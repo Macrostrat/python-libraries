@@ -37,6 +37,11 @@ dev = [
 package = false
 default-groups = "all"
 
+[tool.mono]
+# How far to move a package when a sibling it depends on is released.
+# One of "patch", "minor", "major", or "none" to leave dependents alone.
+update-internal-dependencies = "patch"
+
 [tool.uv.sources]
 "macrostrat.app_frame" = { path = "./app-frame", editable = true }
 "macrostrat.database" = { path = "./database", editable = true }

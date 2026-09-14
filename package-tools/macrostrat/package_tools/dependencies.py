@@ -1,17 +1,5 @@
-from pathlib import Path
+"""Backwards-compatible re-exports; these now live in `packages`."""
 
-from toml import load
+from .packages import get_local_dependencies, load_pkg_config
 
-
-def get_local_dependencies(pkg_cfg: dict[str, dict[str, str]]):
-    """Get UV source packages that are local to the project."""
-
-    deps = pkg_cfg["tool"]["uv"]["sources"]
-    return deps
-
-def load_pkg_config(fp: Path):
-    if fp.is_dir():
-        fp = fp / "pyproject.toml"
-    with fp.open("r") as f:
-        data = load(f)
-        return data
+__all__ = ["get_local_dependencies", "load_pkg_config"]

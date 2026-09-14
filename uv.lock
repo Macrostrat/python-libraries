@@ -782,10 +782,11 @@ dev = [
 
 [[package]]
 name = "macrostrat-package-tools"
-version = "2.0.1"
+version = "2.1.0"
 source = { editable = "package-tools" }
 dependencies = [
     { name = "macrostrat-utils" },
+    { name = "packaging" },
     { name = "requests" },
     { name = "rich" },
     { name = "toml" },
@@ -795,6 +796,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "macrostrat-utils", editable = "utils" },
+    { name = "packaging", specifier = ">=24.0" },
     { name = "requests", specifier = ">=2.30.0,<3" },
     { name = "rich", specifier = ">=13.3.5,<16" },
     { name = "toml", specifier = ">=0.10.2,<0.11" },
