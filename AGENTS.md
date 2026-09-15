@@ -96,11 +96,16 @@ python-libraries/
 │   │   ├── shell.py           # cmd(), split_args()
 │   │   ├── timer.py           # CodeTimer
 │   │   └── exc.py             # BaseError, ApplicationError
+├── .changes/                  # Pending version changes (see section 8)
 ├── package-tools/            # Monorepo publication utilities
 │   ├── macrostrat/package_tools/
-│   │   ├── publish.py         # PyPI publishing
+│   │   ├── packages.py        # Package discovery and PyPI metadata
+│   │   ├── changes.py         # Change fragments, version and changelog updates
+│   │   ├── commands.py        # `mono changeset`, `mono version`
+│   │   ├── status.py          # `mono status` release plan and checks
+│   │   ├── publish.py         # Building and PyPI publishing
 │   │   ├── install.py         # Dependency management
-│   │   └── dependencies.py    # Dependency utilities
+│   │   └── dependencies.py    # Backwards-compatible re-exports
 ├── docs/                      # MkDocs documentation
 │   ├── index.md
 │   └── macrostrat/
@@ -740,9 +745,9 @@ The dinosaur module defines "safe" as "no table data is destroyed." View drops, 
 1. Add function to `/database/macrostrat/database/{module}.py`
 2. Export in `/database/macrostrat/database/__init__.py`
 3. Add test in `/database/tests/test_{feature}.py` using `db` fixture
-4. Update CHANGELOG.md with "Added: ..." entry
-5. Bump version in `database/pyproject.toml`
-6. Run `uv run pytest database/tests` to validate
+4. Run `uv run pytest database/tests` to validate
+5. Record the version change: `uv run mono changeset` (see section 8). Do not
+   edit versions or CHANGELOG.md by hand.
 
 ### Task: Run Migration on Test Database
 1. Define `init_schema()` function (sets up ideal schema)
@@ -850,3 +855,63 @@ def my_fixture(db):
 
 **Last Updated**: June 2026  
 **Status**: Comprehensive; ready for agent onboarding
+
+
+---
+
+## 8. Releases
+
+Releases are driven by **change fragments**, the same way `web-components` uses
+changesets. The version decision is made in the pull request that makes the
+change, and merging to `main` publishes.
+
+### In the pull request
+
+Record what changed and how far each package should move:
+
+```bash
+uv run mono changeset
+```
+
+This writes a small markdown file in `.changes/` naming the affected packages
+and their change levels (`patch`, `minor`, `major`), with the changelog entry.
+**Commit it alongside the change.** Do not hand-edit `version` fields in
+`pyproject.toml` or write `CHANGELOG.md` entries directly.
+
+`mono status` runs as a required check on every pull request. It prints the
+release plan and fails if a version moved without a changelog entry, or with a
+stale `uv.lock`.
+
+### Making the release
+
+When the pending fragments should become a release, apply them:
+
+```bash
+uv run mono version
+```
+
+This raises each affected package's version, cascades to packages that depend
+on it within the monorepo (raising their dependency floors and giving them a
+patch — configured by `tool.mono.update-internal-dependencies` in the root
+`pyproject.toml`), writes each `CHANGELOG.md` entry, refreshes lock files, and
+deletes the fragments it applied. Review the diff, then commit and merge.
+
+### Publishing
+
+`.github/workflows/release.yaml` runs on push to `main` and publishes every
+package whose version is not yet on PyPI, then pushes the version tags. It uses
+**PyPI trusted publishing** through the `pypi` GitHub environment — there is no
+API token anywhere, and approving that environment is the release gate.
+
+Publishing locally is a fallback, not the normal path. `mono publish` builds,
+uploads and tags; it does not commit or regenerate lock files. It needs
+`UV_PUBLISH_TOKEN` set. Use `--dry-run` to see what it would publish.
+
+### Conventions
+
+- A package with no classifiers, or with the `Private :: Do Not Upload`
+  classifier, is never published.
+- CHANGELOG entries are terse one-line bullets; detail belongs in the
+  feature documentation.
+- A version on PyPI can never be reused. Recovery from a bad release is a new
+  patch version, never a retry of the same one.
