@@ -898,7 +898,7 @@ deletes the fragments it applied. Review the diff, then commit and merge.
 
 ### Publishing
 
-`.github/workflows/release.yaml` runs on push to `main` and publishes every
+`.github/workflows/release.yml` runs on push to `main` and publishes every
 package whose version is not yet on PyPI, then pushes the version tags. It uses
 **PyPI trusted publishing** through the `pypi` GitHub environment — there is no
 API token anywhere, and approving that environment is the release gate.
