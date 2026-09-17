@@ -93,7 +93,7 @@ builds versions without writing anything.
 
 ### Publishing to PyPI (GitHub Actions)
 
-`.github/workflows/release.yaml` runs on push to `main`. It publishes every
+`.github/workflows/release.yml` runs on push to `main`. It publishes every
 package whose version is not yet on PyPI, then pushes a
 `macrostrat.<package>-v<version>` tag for each.
 
@@ -101,8 +101,10 @@ Authentication is
 [PyPI trusted publishing](https://docs.pypi.org/trusted-publishers/) through the
 `pypi` GitHub environment: there is no API token anywhere, and approving that
 environment is the release gate. Each package needs a pending publisher
-registered on PyPI for the `UW-Macrostrat/python-libraries` repository, the
-`release.yaml` workflow and the `pypi` environment.
+registered on PyPI for the `Macrostrat/python-libraries` repository, the
+`release.yml` workflow and the `pypi` environment. The workflow filename in
+that configuration must match this file exactly — a `release.yaml`/`release.yml`
+mismatch fails with `invalid-publisher`.
 
 Nothing about a release is irreversible until this step. A version that reaches
 PyPI can never be reused, so recovery from a bad release is a new patch version,

@@ -14,7 +14,7 @@ from packaging.version import InvalidVersion, Version
 from toml import load
 
 PRIVATE_CLASSIFIER = "Private :: Do Not Upload"
-REPO_BASE_URL = "https://github.com/UW-Macrostrat/python-libraries"
+REPO_BASE_URL = "https://github.com/Macrostrat/python-libraries"
 
 
 def load_pkg_config(fp: Path) -> dict:

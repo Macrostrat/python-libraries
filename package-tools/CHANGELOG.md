@@ -1,6 +1,6 @@
 # Changelog
 
-## [2.1.0] - 2026-09-14 [_changes_](https://github.com/UW-Macrostrat/python-libraries/compare/macrostrat.package_tools-v2.0.1...macrostrat.package_tools-v2.1.0)
+## [2.1.0] - 2026-09-14 [_changes_](https://github.com/Macrostrat/python-libraries/compare/macrostrat.package_tools-v2.0.1...macrostrat.package_tools-v2.1.0)
 
 - Add `mono status`, `mono changeset` and `mono version` for
   change-fragment-driven releases.
