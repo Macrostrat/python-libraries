@@ -7,6 +7,12 @@ MosaicJSON document. Reading, compositing and pixel selection are inherited.
 
 Assets are hrefs (plain strings), which is what the base class expects: it
 passes them straight to the reader and reports them back as the asset list.
+
+Two things ride along with the assets from the index and are applied here. A
+per-raster **nodata override** (SRTM GL1 stores the ocean as 0) is handed to the
+reader when that asset is opened, so water falls through to the layer beneath.
+And the **scale window**: with `scale_aware` on and a target zoom in hand, the
+index ranks rasters by closeness to the requested scale rather than finest-first.
 """
 
 from typing import Any, Optional
@@ -20,16 +26,12 @@ from rio_tiler.io import BaseReader, Reader
 from rio_tiler.mosaic.backend import BaseBackend
 from rio_tiler.types import BBox
 
-from macrostrat.raster_index import RasterIndex
+from macrostrat.raster_index import RasterAsset, RasterIndex
 from macrostrat.utils import get_logger
 
 log = get_logger(__name__)
 
 __all__ = ["PGRasterMosaic"]
-
-# The zoom at which a point query is resolved to a tile for asset lookup. Deep
-# enough that a point in a small raster doesn't pull in every raster nearby.
-POINT_LOOKUP_ZOOM = 14
 
 
 @attr.s
@@ -63,10 +65,23 @@ class PGRasterMosaic(BaseBackend):
     # the index is the right tool for deciding what to *cache*.
     allow_overscaled: bool = attr.ib(default=True)
 
+    # Rank rasters by closeness to the requested scale rather than finest-first.
+    # Off by default so existing layers are untouched; a continuous layer that
+    # mixes a global product with fine local tiles wants it on, or a coarse
+    # view opens every fine tile it touches. See `RasterIndex.assets_for_bbox`.
+    scale_aware: bool = attr.ib(default=False)
+    # The zoom a point or area request should be answered at — from
+    # `?resolution=` on the route. Tiles carry their own zoom and ignore it.
+    target_zoom: Optional[int] = attr.ib(default=None)
+
     # Assets resolved for this request, kept so the colormap that came back with
     # them can reach rendering. The backend is constructed per request by the
     # route, so this is request-scoped state, not shared.
     resolved_assets: list = attr.ib(init=False, factory=list)
+    # href -> nodata override for the assets resolved on this request.
+    _overrides: dict = attr.ib(init=False, factory=dict)
+    # The reader class as configured; `reader` itself becomes the wrapper.
+    _open: Any = attr.ib(init=False, default=None)
 
     bounds: BBox = attr.ib(init=False, default=(-180, -90, 180, 90))
     crs: CRS = attr.ib(init=False, default=WGS84_CRS)
@@ -97,6 +112,28 @@ class PGRasterMosaic(BaseBackend):
             if extent.maxzoom is not None:
                 self.maxzoom = extent.maxzoom
 
+        # The base class opens every asset as `self.reader(asset, **options)`,
+        # with one set of options for the whole mosaic. A nodata override is per
+        # raster, so the reader is wrapped to look each asset up as it is opened.
+        self._open = self.reader
+        self.reader = self._open_asset
+
+    def _open_asset(self, asset: str, **kwargs: Any):
+        nodata = self._overrides.get(asset)
+        if nodata is not None:
+            options = dict(kwargs.get("options") or {})
+            # More specific than a mosaic-wide default, so it wins; a request's
+            # own `?nodata=` still arrives on the read call and wins over both.
+            options["nodata"] = nodata
+            kwargs["options"] = options
+        return self._open(asset, **kwargs)
+
+    def _remember(self, assets: list[RasterAsset]) -> list[str]:
+        """Keep what the index said about this request's assets; return hrefs."""
+        self.resolved_assets = assets
+        self._overrides = {a.href: a.nodata for a in assets if a.nodata is not None}
+        return [a.href for a in assets]
+
     # -- Asset lookup ------------------------------------------------------
     #
     # Each returns hrefs, and an empty list where there's no coverage. The base
@@ -111,11 +148,11 @@ class PGRasterMosaic(BaseBackend):
             self.input,
             zoom_tolerance=self.zoom_tolerance,
             rasters=self.rasters,
+            scale_aware=self.scale_aware,
         )
         if not self.allow_overscaled:
             assets = [a for a in assets if not a.overscaled]
-        self.resolved_assets = assets
-        return [a.href for a in assets]
+        return self._remember(assets)
 
     @property
     def colormap(self) -> Optional[dict]:
@@ -169,8 +206,21 @@ class PGRasterMosaic(BaseBackend):
     ) -> list[str]:
         if coord_crs is not None and coord_crs != WGS84_CRS:
             lng, lat, _, _ = transform_bounds(coord_crs, WGS84_CRS, lng, lat, lng, lat)
-        tile = self.tms.tile(lng, lat, POINT_LOOKUP_ZOOM)
-        return self.assets_for_tile(tile.x, tile.y, tile.z)
+        # An exact test against the footprint, not the tile around the point:
+        # once footprints follow coastlines, a click in the water must not open
+        # the land tile whose bounding box covers it.
+        assets = self.index.assets_for_point(
+            lng,
+            lat,
+            self.input,
+            rasters=self.rasters,
+            zoom=self.target_zoom,
+            zoom_tolerance=self.zoom_tolerance,
+            scale_aware=self.scale_aware,
+        )
+        if not self.allow_overscaled:
+            assets = [a for a in assets if not a.overscaled]
+        return self._remember(assets)
 
     def assets_for_bbox(
         self,
@@ -186,6 +236,16 @@ class PGRasterMosaic(BaseBackend):
                 coord_crs, WGS84_CRS, xmin, ymin, xmax, ymax
             )
         assets = self.index.assets_for_bbox(
-            xmin, ymin, xmax, ymax, self.input, rasters=self.rasters
+            xmin,
+            ymin,
+            xmax,
+            ymax,
+            self.input,
+            rasters=self.rasters,
+            zoom=self.target_zoom,
+            zoom_tolerance=self.zoom_tolerance,
+            scale_aware=self.scale_aware,
         )
-        return [a.href for a in assets]
+        if not self.allow_overscaled:
+            assets = [a for a in assets if not a.overscaled]
+        return self._remember(assets)

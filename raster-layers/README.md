@@ -74,3 +74,18 @@ returns a body-carrying 204 (see below).
   and friends would mean reading every raster in a layer; layer-wide metadata
   belongs to the index.
 - **No tile caching.** Left to the host application's caching layer.
+
+## Sampling
+
+`sample_point()` and `sample_line()` read values rather than render them — the
+primitive behind an elevation service. A line is answered with one decimated
+window read per intersecting raster, sized to the sample spacing so it comes
+off the COG overviews, and the spacing is also handed to the index as a target
+scale, so a coarse continental profile is read from a coarse global dataset
+rather than from every fine tile it crosses. Validity is decided by the mask:
+a NaN or a sentinel never reaches the caller, and a masked pixel falls through
+to the next raster.
+
+`PGRasterMosaic` applies each raster's nodata override (see `raster_index`) as
+it opens the file, resolves points exactly against footprints, and with
+`scale_aware=True` honours `?resolution=` on every mosaic route.

@@ -14,9 +14,19 @@ from .categories import (
     categories_from_qml,
     class_metadata_candidates,
 )
-from .defs import LayerDefinition, LayerExtent, RasterAsset, RasterCategory, RasterInfo
+from .declared import Mismatch, VerificationReport
+from .defs import (
+    DeclaredRaster,
+    LayerDefinition,
+    LayerExtent,
+    RasterAsset,
+    RasterCategory,
+    RasterInfo,
+)
+from .external_footprints import FootprintReport, FootprintSource
 from .footprints import get_raster_info
 from .index import RasterIndex, schema_files
+from .scale import resolution_for_zoom, zoom_for_resolution
 from .scan import BucketPrefix, RasterObject, parse_bucket_url, scan_prefix
 
 __all__ = [
@@ -29,6 +39,13 @@ __all__ = [
     "parse_bucket_url",
     "RasterAsset",
     "RasterInfo",
+    "DeclaredRaster",
+    "FootprintSource",
+    "FootprintReport",
+    "Mismatch",
+    "VerificationReport",
+    "zoom_for_resolution",
+    "resolution_for_zoom",
     "LayerDefinition",
     "LayerExtent",
     "RasterCategory",

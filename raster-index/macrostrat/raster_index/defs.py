@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 __all__ = [
     "RasterAsset",
     "RasterInfo",
+    "DeclaredRaster",
     "LayerDefinition",
     "RasterCategory",
     "LayerExtent",
@@ -67,6 +68,15 @@ class RasterAsset(BaseModel):
     # it travels with the asset so a tile read resolves both "which rasters" and
     # "what the values mean" in one query.
     categories: Optional[list[RasterCategory]] = None
+    # A nodata value the reader must apply instead of the file's own — SRTM GL1
+    # stores the ocean as 0, and only an override makes it fall through. None,
+    # the common case, means the file is trusted and the reader stays on its
+    # plain path. Set with `RasterIndex.set_nodata`.
+    nodata: Optional[float] = None
+    # (west, south, east, north) of the file, in EPSG:4326. Lets a caller that
+    # reads several rasters skip one that cannot hold the points it still
+    # needs, without opening it.
+    bounds: Optional[tuple[float, float, float, float]] = None
     # True when the requested tile is zoomed in past what this raster resolves.
     overscaled: bool = False
 
@@ -88,6 +98,41 @@ class RasterInfo(BaseModel):
     # Colormap embedded in the raster itself (a GDAL color table), if any.
     colormap: Optional[dict[int, tuple[int, int, int, int]]] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class DeclaredRaster(BaseModel):
+    """A raster described without being opened.
+
+    For a standardized product — one 1° tile per file, identical dtype, nodata,
+    CRS and resolution throughout — every field the index stores is known from
+    the bucket listing and the product's documentation. Opening 14,000 files to
+    learn nine identical facts costs hours; declaring them costs seconds. The
+    declaration is *verified* against a sample afterwards
+    (`RasterIndex.verify_sample`), never trusted outright.
+
+    Everything a priori goes here: the bounds, the native zoom range, and — where
+    something better than the bounding box is known — the footprint itself.
+    """
+
+    href: str
+    slug: Optional[str] = None
+    # (west, south, east, north) in EPSG:4326: what the file covers.
+    bounds: tuple[float, float, float, float]
+    minzoom: int
+    maxzoom: int
+    dtype: str
+    nbands: int = 1
+    # The nodata value the *file* declares. A reader override is applied
+    # separately (`RasterIndex.set_nodata`), so that `verify_sample` can still
+    # compare this against the file.
+    nodata: Optional[float] = None
+    crs: Optional[str] = "EPSG:4326"
+    # A GeoJSON geometry, in EPSG:4326, standing in for the bounding box as the
+    # selection footprint. Must lie within `bounds`.
+    footprint: Optional[dict[str, Any]] = None
+    # Anything the declaring pipeline wants recorded alongside — typically
+    # where the declaration came from and when it was last verified.
+    info: dict[str, Any] = Field(default_factory=dict)
 
 
 class LayerDefinition(BaseModel):
