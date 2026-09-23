@@ -28,6 +28,7 @@ from sqlalchemy.sql.elements import TextClause
 from macrostrat.database.compat import (
     update_legacy_identifier,
 )
+from macrostrat.database.progress import ActivityIndicator, get_console
 from macrostrat.utils import get_logger
 
 log = get_logger(__name__)
@@ -342,6 +343,9 @@ def _run_sql(
     raise_errors = kwargs.pop("raise_errors", False)
     ensure_single_query = kwargs.pop("ensure_single_query", False)
     output_mode, output_file = _normalize_output_args(kwargs)
+    console = kwargs.pop("console", None)
+    if console is None:
+        console = get_console(output_file)
     has_server_binds = kwargs.pop("has_server_binds", None)
 
     statement_filter = kwargs.pop("statement_filter", None)
@@ -402,6 +406,7 @@ def _run_sql(
                 use_transaction=use_transaction,
                 on_error=on_error,
                 context=ctx,
+                console=console,
             )
 
 
@@ -451,6 +456,7 @@ def _execute_one(
     use_transaction: bool = True,
     on_error: "RecoveryFn | None" = None,
     context: "StatementContext | None" = None,
+    console: "Console | None" = None,
     _recovering: bool = False,
 ):
     params = result.params
@@ -480,15 +486,38 @@ def _execute_one(
         except InvalidRequestError:
             pass
 
+    # Print the statement before it runs, with an activity indicator if it blocks
+    indicator = None
+    if display_text is not None:
+        if console is None:
+            console = get_console(output_file)
+        indicator = ActivityIndicator(display_text, console=console).start()
+
     try:
         log.debug("Executing SQL: \n %s", query)
-        if has_server_binds:
-            conn = _get_connection(connectable)
-            res = conn.exec_driver_sql(query, _params)
-        else:
-            if not isinstance(query, TextClause):
-                query = text(query)
-            res = connectable.execute(query, _params)
+        try:
+            if has_server_binds:
+                conn = _get_connection(connectable)
+                res = conn.exec_driver_sql(query, _params)
+            else:
+                if not isinstance(query, TextClause):
+                    query = text(query)
+                res = connectable.execute(query, _params)
+        except Exception:
+            # Handled (and possibly recovered from) below
+            if indicator is not None:
+                indicator.clear()
+            raise
+        except BaseException:
+            # E.g., a KeyboardInterrupt: show which statement was interrupted
+            if indicator is not None:
+                indicator.done(style="red")
+            raise
+
+        # The statement has finished executing; stop showing it as in progress
+        # before handing the result back to the caller.
+        if indicator is not None:
+            indicator.done()
 
         yield res
 
@@ -496,9 +525,6 @@ def _execute_one(
             trans.commit()
         elif hasattr(connectable, "commit"):
             connectable.commit()
-
-        if display_text is not None:
-            secho(display_text, dim=True, file=output_file)
 
     except Exception as err:
         if trans is not None:
@@ -520,14 +546,25 @@ def _execute_one(
                         output_mode=output_mode,
                         print_skipped=print_skipped,
                         use_transaction=use_transaction,
+                        console=console,
                         _recovering=True,
                     )
                 return
 
+        # Whether the statement is already shown on the console
+        statement_visible = indicator is not None and indicator.label_visible
+
         if raise_errors or _should_raise_query_error(err):
+            if display_text is not None and not statement_visible:
+                secho(display_text, fg="red", dim=True, file=output_file)
             raise err
         if display_text is not None:
-            _print_error(display_text, err, file=output_file)
+            _print_error(
+                display_text,
+                err,
+                file=output_file,
+                show_statement=not statement_visible,
+            )
 
 
 def _should_raise_query_error(err):
@@ -562,7 +599,8 @@ def _print_error(sql_text, err, **kwargs):
     _err = _err.strip()
     # Decide whether error should be dimmed
     dim = kwargs.pop("dim", "already exists" in _err)
-    secho(sql_text, fg=None if dim else "red", dim=True, **kwargs)
+    if kwargs.pop("show_statement", True):
+        secho(sql_text, fg=None if dim else "red", dim=True, **kwargs)
     if dim:
         _err = "  " + _err
     secho(_err, fg="red", dim=dim, **kwargs)
@@ -574,6 +612,8 @@ def run_sql_file(connectable, filename, params=None, **kwargs):
 
 
 def run_query(connectable, query, params=None, **kwargs):
+    # Single queries are not printed unless an output mode is requested
+    kwargs.setdefault("output_mode", OutputMode.NONE)
     return next(
         iter(
             _run_sql(
@@ -636,6 +676,7 @@ def run_fixtures(connectable, fixtures: Union[Path, list[Path]], params=None, **
             params,
             output_mode=output_mode,
             output_file=output_file,
+            console=console,
             **kwargs,
         )
         console.print()
