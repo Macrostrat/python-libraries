@@ -1,6 +1,6 @@
 [project]
 name = "macrostrat.raster_index"
-version = "0.3.1"
+version = "0.3.2"
 description = "An index of cloud-optimized raster datasets, for mosaicked tile serving"
 authors = [{ name = "Daven Quinn", email = "dev@davenquinn.com" }]
 requires-python = ">=3.11,<4"
@@ -14,7 +14,7 @@ classifiers = [
 dependencies = [
     # Used only by `create_schema` (applying multi-statement SQL files), and
     # imported lazily there.
-    "macrostrat.database>=4.5,<5",
+    "macrostrat.database>=4.7.0,<5",
     "macrostrat.utils>=1.3.3,<2",
     "SQLAlchemy>=2.0.18,<3",
     "rio-tiler>=8,<9",

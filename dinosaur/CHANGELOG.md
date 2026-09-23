@@ -1,5 +1,9 @@
 # Changelog
 
+## [4.2.2] - 2026-09-23 [_changes_](https://github.com/Macrostrat/python-libraries/compare/macrostrat.dinosaur-v4.2.1...macrostrat.dinosaur-v4.2.2)
+
+- Require `macrostrat.database` 4.7.0 or newer.
+
 ## [4.2.1] - 2026-08-12
 
 - Fix `database_cluster` on testcontainers 4.x, which now sets `tmpfs` itself and

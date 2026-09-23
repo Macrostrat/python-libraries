@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.3.2] - 2026-09-23 [_changes_](https://github.com/Macrostrat/python-libraries/compare/macrostrat.raster_index-v0.3.1...macrostrat.raster_index-v0.3.2)
+
+- Require `macrostrat.database` 4.7.0 or newer.
+
 ## [0.3.1] - 2026-08-25
 
 - `RasterIndex.layer_extent()` returns bounds *and* the native zoom range of the

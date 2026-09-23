@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.1.1] - 2026-09-23 [_changes_](https://github.com/Macrostrat/python-libraries/compare/macrostrat.auth_system-v1.1.0...macrostrat.auth_system-v1.1.1)
+
+- Require `macrostrat.database` 4.7.0 or newer.
+
 All notable changes to this project will be documented in this file.
 
 ## [0.1.0] - 2024-10-17
