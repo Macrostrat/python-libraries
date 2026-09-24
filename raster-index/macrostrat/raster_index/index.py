@@ -8,6 +8,8 @@ FastAPI's threadpool without dragging session state along.
 """
 
 import json
+import math
+import random
 from pathlib import Path
 from typing import Any, Iterable, Optional, Union
 
@@ -16,9 +18,30 @@ from sqlalchemy.engine import Connection, Engine
 
 from macrostrat.utils import get_logger
 
-from .defs import LayerDefinition, LayerExtent, RasterAsset, RasterCategory, RasterInfo
-from .footprints import get_raster_info
-from .queries import TILE_ENVELOPE, bbox_envelope, selection
+from .declared import VerificationReport, compare_declared
+from .defs import (
+    DeclaredRaster,
+    LayerDefinition,
+    LayerExtent,
+    RasterAsset,
+    RasterCategory,
+    RasterInfo,
+)
+from .external_footprints import (
+    FootprintReport,
+    FootprintRow,
+    FootprintSource,
+    apply_sql,
+    report_sql,
+)
+from .footprints import bounds_to_geometry, get_raster_info
+from .queries import (
+    GEOJSON_GEOMETRY,
+    POINT_GEOMETRY,
+    TILE_ENVELOPE,
+    bbox_envelope,
+    selection,
+)
 
 log = get_logger(__name__)
 
@@ -240,6 +263,8 @@ class RasterIndex:
         ensure_layer: bool = True,
         reader_options: Optional[dict] = None,
         mask_footprint: bool = False,
+        footprint: Optional[dict[str, Any]] = None,
+        nodata: Optional[float] = None,
     ) -> RasterInfo:
         """Register a raster, reading its metadata if not supplied.
 
@@ -247,11 +272,16 @@ class RasterIndex:
         bucket twice refreshes the index rather than duplicating it. One
         consequence worth knowing — a raster belongs to exactly one layer, so
         registering the same href under a different layer *moves* it rather than
-        adding a second copy.
+        adding a second copy. A footprint or nodata override set earlier
+        survives a plain re-registration (see the SQL below).
 
-        `mask_footprint` trades registration time for query selectivity: the
-        footprint follows the valid data rather than the file's corners, so tiles
-        outside the data stop selecting this raster at all.
+        `footprint` supplies the selection geometry a priori — a survey boundary,
+        a coastline clip — in place of the bounding box. `mask_footprint` derives
+        one from the data instead, trading registration time for selectivity.
+
+        `nodata` is a *reader override*: the value the serving side treats as
+        missing regardless of what the file declares. The file's own nodata is
+        still recorded in the `nodata` column, so a verification can compare it.
         """
         href = str(href)
         if info is None:
@@ -259,8 +289,8 @@ class RasterIndex:
         if slug is None:
             slug = default_slug(href)
 
-        geometry = info.geometry
-        if mask_footprint:
+        geometry = footprint if footprint is not None else info.geometry
+        if mask_footprint and footprint is None:
             # Reads the raster's mask, so it is opt-in — see `mask_footprint`.
             # `None` means the data fills its bounding box and the bbox stands.
             from .mask_footprint import mask_footprint as compute_mask_footprint
@@ -277,35 +307,16 @@ class RasterIndex:
         if ensure_layer:
             self._ensure_layer(layer)
 
-        sql = text("""
-            INSERT INTO raster_layers.raster
-              (layer, slug, href, footprint, minzoom, maxzoom, dtype, nbands,
-               nodata, crs, rescale_range, info)
-            VALUES (
-              :layer, :slug, :href,
-              ST_SetSRID(ST_GeomFromGeoJSON(:geometry), 4326),
-              :minzoom, :maxzoom, :dtype, :nbands, :nodata, :crs,
-              CAST(:rescale_range AS numeric[]), CAST(:info AS jsonb)
-            )
-            ON CONFLICT (href) DO UPDATE SET
-              layer = excluded.layer,
-              slug = excluded.slug,
-              footprint = excluded.footprint,
-              minzoom = excluded.minzoom,
-              maxzoom = excluded.maxzoom,
-              dtype = excluded.dtype,
-              nbands = excluded.nbands,
-              nodata = excluded.nodata,
-              crs = excluded.crs,
-              rescale_range = excluded.rescale_range,
-              info = excluded.info,
-              updated_at = now()
-            """)
-        params = dict(
+        metadata = dict(info.metadata)
+        if nodata is not None:
+            metadata["nodata_override"] = nodata
+
+        params = _raster_row(
             layer=layer,
             slug=slug,
             href=href,
-            geometry=json.dumps(geometry),
+            geometry=geometry,
+            bounds=info.bounds,
             minzoom=minzoom if minzoom is not None else info.minzoom,
             maxzoom=maxzoom if maxzoom is not None else info.maxzoom,
             dtype=info.dtype,
@@ -313,12 +324,189 @@ class RasterIndex:
             nodata=info.nodata,
             crs=info.crs,
             rescale_range=rescale_range,
-            info=_json(info.metadata),
+            info=metadata,
         )
         with self.engine.begin() as conn:
-            conn.execute(sql, params)
+            conn.execute(_UPSERT_RASTER, params)
         log.info("Registered raster %s in layer %s", slug, layer)
         return info
+
+    def add_declared(
+        self,
+        layer: str,
+        rasters: Iterable[DeclaredRaster],
+        *,
+        ensure_layer: bool = True,
+        batch_size: int = 1000,
+    ) -> int:
+        """Register rasters from declarations, opening no files.
+
+        The path for a standardized product: rows come from a bucket listing
+        plus a declared profile, and the whole index is written in one
+        statement per batch. Nothing is read, so nothing is *checked* here —
+        follow with `verify_sample`, which is the other half of the contract.
+
+        Returns how many rows were written.
+        """
+        if ensure_layer:
+            self._ensure_layer(layer)
+
+        written = 0
+        batch: list[dict] = []
+
+        def flush():
+            nonlocal written
+            if not batch:
+                return
+            with self.engine.begin() as conn:
+                conn.execute(_UPSERT_RASTER, batch)
+            written += len(batch)
+            batch.clear()
+
+        for declared in rasters:
+            geometry = declared.footprint or bounds_to_geometry(declared.bounds)
+            batch.append(
+                _raster_row(
+                    layer=layer,
+                    slug=declared.slug or default_slug(declared.href),
+                    href=declared.href,
+                    geometry=geometry,
+                    bounds=declared.bounds,
+                    minzoom=declared.minzoom,
+                    maxzoom=declared.maxzoom,
+                    dtype=declared.dtype,
+                    nbands=declared.nbands,
+                    nodata=declared.nodata,
+                    crs=declared.crs,
+                    rescale_range=None,
+                    info=dict(declared.info),
+                )
+            )
+            if len(batch) >= batch_size:
+                flush()
+        flush()
+        log.info("Registered %d declared rasters in layer %s", written, layer)
+        return written
+
+    def set_nodata(
+        self,
+        layer: str,
+        nodata: Optional[float],
+        *,
+        rasters: Optional[list[str]] = None,
+    ) -> int:
+        """Set (or, with None, clear) the reader nodata override for a layer.
+
+        The override is what the serving side passes to the reader; the
+        `nodata` column keeps what the file declares. SRTM GL1 is the motivating
+        case — the file says -32768 and stores the ocean as 0 — and one override
+        is what lets water fall through to a bathymetry layer beneath it.
+        Returns how many rasters were affected.
+        """
+        if nodata is None:
+            sql = text("""
+                UPDATE raster_layers.raster
+                SET info = info - 'nodata_override', updated_at = now()
+                WHERE layer = :layer
+                  AND info ? 'nodata_override'
+                  AND (CAST(:rasters AS text[]) IS NULL
+                       OR slug = ANY(CAST(:rasters AS text[])))
+                """)
+        else:
+            sql = text("""
+                UPDATE raster_layers.raster
+                SET info = coalesce(info, CAST('{}' AS jsonb))
+                           || jsonb_build_object('nodata_override', CAST(:nodata AS text)),
+                    updated_at = now()
+                WHERE layer = :layer
+                  AND (CAST(:rasters AS text[]) IS NULL
+                       OR slug = ANY(CAST(:rasters AS text[])))
+                """)
+        # Stored as text so NaN survives: JSON has no NaN, and Postgres reads
+        # the string back as a float when the selection query casts it.
+        params = dict(layer=layer, rasters=rasters, nodata=_float_text(nodata))
+        with self.engine.begin() as conn:
+            count = conn.execute(sql, params).rowcount
+        log.info("Set nodata override %r on %d rasters in %s", nodata, count, layer)
+        return count
+
+    def set_footprints(
+        self,
+        layer: str,
+        source: FootprintSource,
+        *,
+        rasters: Optional[list[str]] = None,
+        apply: bool = True,
+    ) -> FootprintReport:
+        """Clip each raster's footprint to an external geometry.
+
+        The footprint becomes `bounds ∩ source` — computed from the stored
+        bounds every time, so this is re-runnable and can never claim ground
+        outside the file. A raster that the source does not touch at all is
+        *reported* in the result and left alone; that is either a raster to
+        remove or the wrong source, and neither should be decided silently.
+
+        With `apply=False` the report is produced and nothing is written.
+        """
+        params: dict[str, Any] = dict(layer=layer, rasters=rasters, **source.params)
+        with self.engine.begin() as conn:
+            rows = conn.execute(text(report_sql(source)), params).mappings().all()
+            report = FootprintReport(
+                layer=layer,
+                source=source.description,
+                rows=[
+                    FootprintRow(
+                        r["slug"], float(r["fraction"] or 0.0), int(r["vertices"])
+                    )
+                    for r in rows
+                ],
+                applied=apply,
+            )
+            if apply:
+                conn.execute(text(apply_sql(source)), params)
+        if apply:
+            log.info(
+                "Clipped %d footprints in %s against %s (%d unchanged, %d outside)",
+                len(report.clipped),
+                layer,
+                source.description,
+                len(report.whole),
+                len(report.empty),
+            )
+        return report
+
+    def verify_sample(
+        self,
+        layer: str,
+        *,
+        sample: int = 10,
+        seed: Optional[int] = None,
+        rasters: Optional[list[str]] = None,
+        reader_options: Optional[dict] = None,
+    ) -> VerificationReport:
+        """Open a random sample of a layer's rasters and compare them to the index.
+
+        The check that turns a declaration into a dated verification: every
+        stored fact about each sampled raster — dtype, bands, CRS, nodata, zoom
+        range, bounds — is compared against a fresh read of the file. Any
+        disagreement is returned rather than raised, so a caller can print all of
+        them at once.
+        """
+        rows = self.rasters(layer)
+        if rasters is not None:
+            wanted = set(rasters)
+            rows = [r for r in rows if r["slug"] in wanted]
+        chosen = random.Random(seed).sample(rows, min(sample, len(rows)))
+
+        report = VerificationReport(layer, len(chosen), [], [])
+        for row in chosen:
+            try:
+                info = get_raster_info(row["href"], **(reader_options or {}))
+            except Exception as err:  # noqa: BLE001 - reported, not raised
+                report.unreadable.append((row["slug"], str(err)))
+                continue
+            report.mismatches.extend(compare_declared(row, info))
+        return report
 
     def add_rasters(
         self, hrefs: Iterable[Union[str, Path]], layer: str, **kwargs
@@ -339,7 +527,10 @@ class RasterIndex:
     def rasters(self, layer: Optional[str] = None) -> list[dict[str, Any]]:
         sql = """
             SELECT id, layer, slug, href, minzoom, maxzoom, dtype, nbands,
-                   nodata, crs, ST_AsGeoJSON(footprint) footprint
+                   nodata, crs, ST_AsGeoJSON(footprint) footprint,
+                   ARRAY[ST_XMin(bounds), ST_YMin(bounds),
+                         ST_XMax(bounds), ST_YMax(bounds)] bounds,
+                   CAST(info ->> 'nodata_override' AS double precision) nodata_override
             FROM raster_layers.raster
         """
         params: dict[str, Any] = {}
@@ -412,7 +603,7 @@ class RasterIndex:
     # Columns needed to build a `RasterAsset`.
     _ASSET_COLUMNS = (
         "href, layer, slug, minzoom, maxzoom, rescale_range, colormap, "
-        "categories, overscaled"
+        "categories, nodata, bounds, overscaled"
     )
 
     def _select_assets(self, geometry: str, params: dict) -> list[RasterAsset]:
@@ -423,7 +614,13 @@ class RasterIndex:
         with self.engine.connect() as conn:
             rows = conn.execute(sql, params).mappings().all()
         return [
-            RasterAsset(**{**dict(row), "rescale_range": _floats(row["rescale_range"])})
+            RasterAsset(
+                **{
+                    **dict(row),
+                    "rescale_range": _floats(row["rescale_range"]),
+                    "bounds": _bounds(row["bounds"]),
+                }
+            )
             for row in rows
         ]
 
@@ -436,11 +633,14 @@ class RasterIndex:
         *,
         zoom_tolerance: int = 3,
         rasters: Optional[list[str]] = None,
+        scale_aware: bool = False,
     ) -> list[RasterAsset]:
         """The rasters to composite for a tile, in compositing order.
 
         `rasters` narrows the mosaic to specific slugs — one dataset viewed
-        through the layer rather than on its own terms.
+        through the layer rather than on its own terms. `scale_aware` ranks by
+        closeness to the tile's zoom instead of finest-first; off by default so
+        existing tile layers are untouched.
         """
         return self._select_assets(
             TILE_ENVELOPE,
@@ -450,8 +650,7 @@ class RasterIndex:
                 z=z,
                 layers=layers,
                 rasters=rasters,
-                zoom=z,
-                tolerance=zoom_tolerance,
+                **_scale_params(z, zoom_tolerance, scale_aware),
             ),
         )
 
@@ -464,10 +663,17 @@ class RasterIndex:
         layers: list[str],
         *,
         rasters: Optional[list[str]] = None,
+        zoom: Optional[int] = None,
+        zoom_tolerance: int = 3,
+        scale_aware: bool = False,
     ) -> list[RasterAsset]:
         """The rasters intersecting a WGS84 bounding box, in compositing order.
 
-        No zoom is involved, so nothing is filtered or flagged as overscaled.
+        Without `zoom` nothing is filtered or flagged as overscaled. With one,
+        the same window a tile query applies is in force — rasters far too fine
+        for the requested scale are left out — and `scale_aware` additionally
+        ranks by closeness to it. This is what keeps a coarse continental
+        profile from opening every 1° tile it crosses.
         """
         return self._select_assets(
             bbox_envelope,
@@ -478,8 +684,61 @@ class RasterIndex:
                 north=north,
                 layers=layers,
                 rasters=rasters,
-                zoom=None,
-                tolerance=None,
+                **_scale_params(zoom, zoom_tolerance, scale_aware),
+            ),
+        )
+
+    def assets_for_point(
+        self,
+        lng: float,
+        lat: float,
+        layers: list[str],
+        *,
+        rasters: Optional[list[str]] = None,
+        zoom: Optional[int] = None,
+        zoom_tolerance: int = 3,
+        scale_aware: bool = False,
+    ) -> list[RasterAsset]:
+        """The rasters whose footprint contains a point, in read order.
+
+        An exact test against the footprint rather than against the tile
+        around the point, so a footprint clipped to a coastline is honored
+        precisely: a click in the water never selects the land tile whose
+        bounding box covers it. Scale parameters as for `assets_for_bbox`.
+        """
+        return self._select_assets(
+            POINT_GEOMETRY,
+            dict(
+                lng=lng,
+                lat=lat,
+                layers=layers,
+                rasters=rasters,
+                **_scale_params(zoom, zoom_tolerance, scale_aware),
+            ),
+        )
+
+    def assets_for_geometry(
+        self,
+        geometry: dict[str, Any],
+        layers: list[str],
+        *,
+        rasters: Optional[list[str]] = None,
+        zoom: Optional[int] = None,
+        zoom_tolerance: int = 3,
+        scale_aware: bool = False,
+    ) -> list[RasterAsset]:
+        """The rasters intersecting a GeoJSON geometry (EPSG:4326), in read order.
+
+        A profile line selects only what it actually crosses, rather than every
+        raster in its bounding box. Scale parameters as for `assets_for_bbox`.
+        """
+        return self._select_assets(
+            GEOJSON_GEOMETRY,
+            dict(
+                geometry=json.dumps(geometry),
+                layers=layers,
+                rasters=rasters,
+                **_scale_params(zoom, zoom_tolerance, scale_aware),
             ),
         )
 
@@ -504,7 +763,14 @@ class RasterIndex:
             )
             """)
         params = dict(
-            x=x, y=y, z=z, layers=layers, rasters=rasters, zoom=z, tolerance=3
+            x=x,
+            y=y,
+            z=z,
+            layers=layers,
+            rasters=rasters,
+            zoom=z,
+            tolerance=3,
+            target_zoom=None,
         )
         with self.engine.connect() as conn:
             return bool(conn.execute(sql, params).scalar())
@@ -536,7 +802,9 @@ class RasterIndex:
             ) a
             WHERE e IS NOT NULL
             """)
-        params = dict(layers=layers, rasters=rasters, zoom=None, tolerance=None)
+        params = dict(
+            layers=layers, rasters=rasters, zoom=None, tolerance=None, target_zoom=None
+        )
         with self.engine.connect() as conn:
             row = conn.execute(sql, params).first()
         if row is None:
@@ -575,7 +843,9 @@ class RasterIndex:
             )
             FROM ({selection()}) selected
             """)
-        params = dict(layers=layers, rasters=rasters, zoom=None, tolerance=None)
+        params = dict(
+            layers=layers, rasters=rasters, zoom=None, tolerance=None, target_zoom=None
+        )
         with self.engine.connect() as conn:
             features = [r[0] for r in conn.execute(sql, params)]
         return {"type": "FeatureCollection", "features": features}
@@ -619,7 +889,14 @@ class RasterIndex:
             WHERE geom IS NOT NULL
             """)
         params = dict(
-            x=x, y=y, z=z, layers=layers, rasters=rasters, zoom=None, tolerance=None
+            x=x,
+            y=y,
+            z=z,
+            layers=layers,
+            rasters=rasters,
+            zoom=None,
+            tolerance=None,
+            target_zoom=None,
         )
         with self.engine.connect() as conn:
             data = conn.execute(sql, params).scalar()
@@ -636,6 +913,108 @@ class RasterIndex:
             """)
         with self.engine.begin() as conn:
             conn.execute(sql, dict(slug=slug))
+
+
+# One statement for every way a raster row is written, so that reading a file
+# and declaring one cannot drift apart. Keyed on `href`.
+_UPSERT_RASTER = text("""
+    INSERT INTO raster_layers.raster
+      (layer, slug, href, footprint, bounds, minzoom, maxzoom, dtype, nbands,
+       nodata, crs, rescale_range, info)
+    VALUES (
+      :layer, :slug, :href,
+      ST_SetSRID(ST_GeomFromGeoJSON(CAST(:geometry AS text)), 4326),
+      ST_MakeEnvelope(:west, :south, :east, :north, 4326),
+      :minzoom, :maxzoom, :dtype, :nbands, :nodata, :crs,
+      CAST(:rescale_range AS numeric[]), CAST(:info AS jsonb)
+    )
+    ON CONFLICT (href) DO UPDATE SET
+      layer = excluded.layer,
+      slug = excluded.slug,
+      -- A footprint that was deliberately set — clipped to a coastline, traced
+      -- from the mask — survives a plain re-registration of the same file.
+      -- Only a registration that brings a footprint of its own, or a file whose
+      -- bounds have changed, replaces it.
+      footprint = CASE
+        WHEN ST_Equals(excluded.footprint, excluded.bounds)
+         AND raster.bounds IS NOT NULL
+         AND ST_Equals(raster.bounds, excluded.bounds)
+         AND NOT ST_Equals(raster.footprint, raster.bounds)
+        THEN raster.footprint
+        ELSE excluded.footprint
+      END,
+      bounds = excluded.bounds,
+      minzoom = excluded.minzoom,
+      maxzoom = excluded.maxzoom,
+      dtype = excluded.dtype,
+      nbands = excluded.nbands,
+      nodata = excluded.nodata,
+      crs = excluded.crs,
+      rescale_range = excluded.rescale_range,
+      -- Likewise a nodata override, unless the new registration carries one.
+      info = CASE
+        WHEN raster.info ? 'nodata_override'
+         AND NOT (excluded.info ? 'nodata_override')
+        THEN excluded.info
+             || jsonb_build_object('nodata_override', raster.info -> 'nodata_override')
+        ELSE excluded.info
+      END,
+      updated_at = now()
+    """)
+
+
+def _raster_row(
+    *,
+    layer: str,
+    slug: str,
+    href: str,
+    geometry: dict[str, Any],
+    bounds: tuple[float, float, float, float],
+    minzoom: Optional[int],
+    maxzoom: Optional[int],
+    dtype: Optional[str],
+    nbands: Optional[int],
+    nodata: Optional[float],
+    crs: Optional[str],
+    rescale_range: Optional[list[float]],
+    info: dict[str, Any],
+) -> dict[str, Any]:
+    """Bind parameters for `_UPSERT_RASTER`."""
+    west, south, east, north = bounds
+    return dict(
+        layer=layer,
+        slug=slug,
+        href=href,
+        geometry=json.dumps(geometry),
+        west=west,
+        south=south,
+        east=east,
+        north=north,
+        minzoom=minzoom,
+        maxzoom=maxzoom,
+        dtype=dtype,
+        nbands=nbands,
+        nodata=nodata,
+        crs=crs,
+        rescale_range=rescale_range,
+        info=_json(info),
+    )
+
+
+def _scale_params(
+    zoom: Optional[int], tolerance: int, scale_aware: bool
+) -> dict[str, Optional[int]]:
+    """The three scale bind parameters, from one zoom and one switch.
+
+    `zoom` drives the filter and the `overscaled` flag; `target_zoom` drives
+    the ranking, and is only set when the caller asked for scale-aware
+    selection. Without a zoom there is nothing to filter or rank by.
+    """
+    if zoom is None:
+        return dict(zoom=None, tolerance=None, target_zoom=None)
+    return dict(
+        zoom=zoom, tolerance=tolerance, target_zoom=zoom if scale_aware else None
+    )
 
 
 def default_slug(href: str) -> str:
@@ -685,10 +1064,47 @@ def _categories(value: Optional[Any]) -> list[RasterCategory]:
 
 
 def _json(value: Optional[dict]) -> Optional[str]:
-    """Serialize a dict for a `jsonb` column, preserving SQL NULL."""
+    """Serialize a dict for a `jsonb` column, preserving SQL NULL.
+
+    JSON has no NaN, and a float32 raster's nodata very often is one. Non-finite
+    floats become the strings Postgres itself uses for them, which it reads
+    back as floats when the value is cast.
+    """
     if value is None:
         return None
-    return json.dumps(value)
+    return json.dumps(_jsonable(value))
+
+
+def _jsonable(value: Any) -> Any:
+    if isinstance(value, float) and not math.isfinite(value):
+        return _float_text(value)
+    if isinstance(value, dict):
+        return {k: _jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(v) for v in value]
+    return value
+
+
+def _float_text(value: Optional[float]) -> Optional[str]:
+    """A float as the text Postgres reads back with `CAST(... AS double precision)`."""
+    if value is None:
+        return None
+    if math.isnan(value):
+        return "NaN"
+    if math.isinf(value):
+        return "Infinity" if value > 0 else "-Infinity"
+    return repr(float(value))
+
+
+def _bounds(value: Optional[Iterable]) -> Optional[tuple[float, float, float, float]]:
+    """A `bounds` array column as a tuple; None where the row has no bounds yet."""
+    if value is None:
+        return None
+    values = [v for v in value]
+    if any(v is None for v in values):
+        return None
+    west, south, east, north = (float(v) for v in values)
+    return (west, south, east, north)
 
 
 def _floats(value: Optional[Iterable]) -> Optional[list[float]]:

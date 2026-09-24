@@ -76,3 +76,27 @@ S3 API, rather than being a second code path.
 - WebMercatorQuad only. Alternate tile grids (and non-Earth bodies, as in
   [mars-tiler](https://github.com/davenquinn/mars-tiler)) would need a per-grid
   bounds table.
+
+## Continuous layers and a priori metadata
+
+Everything above was built for categorical mosaics of a few dozen rasters.
+Global elevation products are the opposite: 14,000 uniform 1° tiles whose
+facts are known before any file is opened. Three mechanisms cover that:
+
+- **Declared registration.** `RasterIndex.add_declared()` writes rows from
+  `DeclaredRaster` objects — bounds, zoom range, dtype, nodata, optionally a
+  footprint — and opens nothing. `verify` (`RasterIndex.verify_sample()`) then
+  opens a random sample and reports every field on which a file disagrees.
+- **Footprints from outside.** `set-footprints <layer> --from public.land`
+  clips each raster's *bounds* against a table or GeoJSON, so a coastal tile is
+  only selected over land. Always recomputed from `bounds`; rasters the source
+  does not touch are reported and left alone.
+- **A nodata override.** `set-nodata <layer> 0` tells the reader to treat a
+  value as missing regardless of what the file says (SRTM stores the ocean as
+  0). The file's own nodata stays in the `nodata` column for verification.
+
+Selection can also be **scale-aware**: `assets_for_bbox()`, `assets_for_point()`
+and `assets_for_geometry()` take a `zoom` (from `zoom_for_resolution(metres)`),
+which filters out rasters far too fine for the request and, with
+`scale_aware=True`, ranks the rest by closeness to it. Without a zoom, ordering
+is finest-first as before.
