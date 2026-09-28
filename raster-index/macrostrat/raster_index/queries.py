@@ -73,8 +73,8 @@ SELECTION = """
       -- makes water fall through to bathymetry. NULL — the common case — leaves
       -- the reader on its plain, fast path.
       CAST(r.info ->> 'nodata_override' AS double precision) nodata,
-      ARRAY[ST_XMin(r.bounds), ST_YMin(r.bounds), ST_XMax(r.bounds), ST_YMax(r.bounds)]
-        bounds,
+      ARRAY[ST_XMin(r.footprint), ST_YMin(r.footprint),
+            ST_XMax(r.footprint), ST_YMax(r.footprint)] bounds,
       coalesce(CAST(:zoom AS integer) > coalesce(r.maxzoom, l.maxzoom), false)
         overscaled
     FROM raster_layers.raster r

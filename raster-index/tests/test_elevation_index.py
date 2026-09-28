@@ -102,7 +102,7 @@ def _footprint_area(index, slug) -> float:
 
 
 class TestBounds:
-    def test_bounds_are_stored_apart_from_the_footprint(self, index):
+    def test_bounds_are_the_footprint_envelope(self, index):
         row = next(r for r in index.rasters("land") if r["slug"] == "fine")
         assert tuple(row["bounds"]) == FINE_BOUNDS
 
@@ -155,6 +155,9 @@ class TestDeclared:
                     href=str(dem_files["elsewhere"]),
                     slug="wrong",
                     bounds=ELSEWHERE_BOUNDS,
+                    # Claims a strip the file does not cover. Explicit, since a
+                    # re-declared bounding box alone never widens a footprint.
+                    footprint=box(10.0, 10.0, 10.2, 10.1).__geo_interface__,
                     minzoom=info.minzoom,
                     maxzoom=info.maxzoom,
                     dtype="float32",  # it is int16
@@ -165,7 +168,11 @@ class TestDeclared:
         try:
             report = index.verify_sample("declared", sample=5, seed=1)
             assert not report.ok
-            assert {m.field for m in report.mismatches} == {"dtype", "nodata"}
+            assert {m.field for m in report.mismatches} == {
+                "dtype",
+                "nodata",
+                "footprint",
+            }
         finally:
             index.add_raster(dem_files["elsewhere"], layer="land", slug="elsewhere")
             index.remove_layer("declared")
@@ -258,6 +265,7 @@ class TestExternalFootprints:
         )
         assert not report.applied
         clipped = {r.slug: r for r in report.clipped}
+        # 0.03° of the 0.1° tile is sea: 70% of the footprint is kept.
         assert clipped["fine"].fraction == approx_fraction(0.7)
         assert [r.slug for r in report.empty] == ["elsewhere"]
         assert _footprint_area(index, "fine") == before
@@ -278,16 +286,29 @@ class TestExternalFootprints:
     def test_outside_rasters_are_left_alone(self, index):
         assert _footprint_area(index, "elsewhere") == box(*ELSEWHERE_BOUNDS).area
 
-    def test_rerun_does_not_erode(self, index):
+    def test_rerun_is_idempotent(self, index):
         first = _footprint_area(index, "fine")
-        index.set_footprints("land", FootprintSource.geojson(LAND))
+        report = index.set_footprints("land", FootprintSource.geojson(LAND))
         assert _footprint_area(index, "fine") == first
+        # Nothing shrank this time: the clip reports the fine tile as whole.
+        assert {r.slug for r in report.whole} == {"fine"}
 
-    def test_re_registration_keeps_the_clipped_footprint(self, index, dem_files):
+    def test_re_registration_never_widens(self, index, dem_files):
         clipped = _footprint_area(index, "fine")
         assert clipped < box(*FINE_BOUNDS).area
         index.add_raster(dem_files["fine"], layer="land", slug="fine")
         assert _footprint_area(index, "fine") == clipped
+
+    def test_an_explicit_footprint_replaces(self, index, dem_files):
+        index.add_raster(
+            dem_files["fine"],
+            layer="land",
+            slug="fine",
+            footprint=box(*FINE_BOUNDS).__geo_interface__,
+        )
+        assert _footprint_area(index, "fine") == box(*FINE_BOUNDS).area
+        # Back to the clipped state for what follows.
+        index.set_footprints("land", FootprintSource.geojson(LAND))
 
     def test_from_a_table(self, index):
         with index.engine.begin() as conn:
@@ -381,6 +402,7 @@ class TestScaleWindow:
 
     def test_a_point_query_is_exact_and_carries_bounds(self, index):
         assets = index.assets_for_point(-104.95, 40.05, ["land"])
+        # The unclipped fixture: the footprint envelope is the file's extent.
         assert assets[0].bounds == FINE_BOUNDS
         assert index.assets_for_point(-104.95, 40.2, ["land"]) == []
 

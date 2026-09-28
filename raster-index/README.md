@@ -88,9 +88,10 @@ facts are known before any file is opened. Three mechanisms cover that:
   footprint — and opens nothing. `verify` (`RasterIndex.verify_sample()`) then
   opens a random sample and reports every field on which a file disagrees.
 - **Footprints from outside.** `set-footprints <layer> --from public.land`
-  clips each raster's *bounds* against a table or GeoJSON, so a coastal tile is
-  only selected over land. Always recomputed from `bounds`; rasters the source
-  does not touch are reported and left alone.
+  clips each raster's footprint against a table or GeoJSON, so a coastal tile is
+  only selected over land. A footprint only ever gets tighter (re-register the
+  file to reset it); rasters the source does not touch are reported and left
+  alone.
 - **A nodata override.** `set-nodata <layer> 0` tells the reader to treat a
   value as missing regardless of what the file says (SRTM stores the ocean as
   0). The file's own nodata stays in the `nodata` column for verification.

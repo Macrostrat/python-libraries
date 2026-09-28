@@ -7,9 +7,9 @@ boundaries, a hand-drawn GeoJSON. Clipping each raster's bounding box against
 such a geometry reproduces what tracing the pixels would say — to within a tenth
 of a percent on SRTM's coastal tiles — in seconds, with no COG opened.
 
-Two guarantees are built in. The result is always `bounds ∩ source`, recomputed
-from the stored bounds rather than the current footprint, so re-running it never
-erodes anything and a raster can never claim ground outside its own file. And
+Two guarantees are built in. The result is `footprint ∩ source`, so a raster can
+never claim ground outside what it already claimed and running the same clip
+twice changes nothing; re-registering the file is how a footprint is reset. And
 an empty clip is *reported, not stored*: a raster wholly outside the source is
 either one to remove or a wrong source, and either way a human should see it.
 """
@@ -48,7 +48,7 @@ class FootprintSource:
         """A PostGIS table (or view), optionally schema-qualified.
 
         Kept as a plain `SELECT` so the planner inlines it and the table's own
-        spatial index drives the `&&` test against each raster's bounds.
+        spatial index drives the `&&` test against each raster's footprint.
         """
         parts = name.split(".")
         if len(parts) > 2:
@@ -114,7 +114,8 @@ def _geometries(data: dict[str, Any]):
 @dataclass(frozen=True)
 class FootprintRow:
     slug: str
-    # Footprint area as a share of the bounding box; 0 where nothing intersects.
+    # Area kept, as a share of the footprint before the clip; 0 where nothing
+    # intersects.
     fraction: float
     vertices: int
 
@@ -134,12 +135,12 @@ class FootprintReport:
 
     @property
     def clipped(self) -> list[FootprintRow]:
-        """Rasters whose footprint is now smaller than their bounding box."""
+        """Rasters whose footprint got smaller."""
         return [r for r in self.rows if 0 < r.fraction < 0.9999]
 
     @property
     def whole(self) -> list[FootprintRow]:
-        """Rasters lying entirely inside the source: the bounding box stands."""
+        """Rasters lying entirely inside the source: the footprint stands."""
         return [r for r in self.rows if r.fraction >= 0.9999]
 
     @property
@@ -149,12 +150,12 @@ class FootprintReport:
 
 
 # The clip, shared by the report and the write so they cannot disagree. Each
-# raster's *bounds* — never its current footprint — are intersected with every
-# source row they touch, and the pieces unioned.
+# raster's footprint is intersected with every source row it touches, and the
+# pieces unioned.
 CLIP = """
     WITH source AS ({source}),
     targets AS (
-      SELECT id, slug, bounds
+      SELECT id, slug, footprint
       FROM raster_layers.raster
       WHERE layer = :layer
         AND (CAST(:rasters AS text[]) IS NULL OR slug = ANY(CAST(:rasters AS text[])))
@@ -162,10 +163,10 @@ CLIP = """
     clipped AS (
       SELECT t.id,
              ST_Multi(ST_CollectionExtract(
-               ST_MakeValid(ST_Union(ST_Intersection(t.bounds, s.geom))), 3
+               ST_MakeValid(ST_Union(ST_Intersection(t.footprint, s.geom))), 3
              )) AS geom
       FROM targets t
-      JOIN source s ON s.geom && t.bounds
+      JOIN source s ON s.geom && t.footprint
       GROUP BY t.id
     )
 """
@@ -173,7 +174,7 @@ CLIP = """
 REPORT = CLIP + """
     SELECT t.slug,
            CASE WHEN c.geom IS NULL OR ST_IsEmpty(c.geom) THEN 0
-                ELSE ST_Area(c.geom) / nullif(ST_Area(t.bounds), 0) END AS fraction,
+                ELSE ST_Area(c.geom) / nullif(ST_Area(t.footprint), 0) END AS fraction,
            CASE WHEN c.geom IS NULL OR ST_IsEmpty(c.geom) THEN 0
                 ELSE ST_NPoints(c.geom) END AS vertices
     FROM targets t

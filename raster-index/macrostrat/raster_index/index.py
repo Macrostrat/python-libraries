@@ -272,8 +272,10 @@ class RasterIndex:
         bucket twice refreshes the index rather than duplicating it. One
         consequence worth knowing — a raster belongs to exactly one layer, so
         registering the same href under a different layer *moves* it rather than
-        adding a second copy. A footprint or nodata override set earlier
-        survives a plain re-registration (see the SQL below).
+        adding a second copy. A footprint tightened earlier — clipped, traced,
+        declared — survives a plain re-registration, since re-registering never
+        *widens* a footprint; pass `footprint` to replace it. A nodata override
+        survives likewise.
 
         `footprint` supplies the selection geometry a priori — a survey boundary,
         a coastline clip — in place of the bounding box. `mask_footprint` derives
@@ -316,7 +318,7 @@ class RasterIndex:
             slug=slug,
             href=href,
             geometry=geometry,
-            bounds=info.bounds,
+            explicit_footprint=footprint is not None,
             minzoom=minzoom if minzoom is not None else info.minzoom,
             maxzoom=maxzoom if maxzoom is not None else info.maxzoom,
             dtype=info.dtype,
@@ -371,7 +373,7 @@ class RasterIndex:
                     slug=declared.slug or default_slug(declared.href),
                     href=declared.href,
                     geometry=geometry,
-                    bounds=declared.bounds,
+                    explicit_footprint=declared.footprint is not None,
                     minzoom=declared.minzoom,
                     maxzoom=declared.maxzoom,
                     dtype=declared.dtype,
@@ -440,11 +442,12 @@ class RasterIndex:
     ) -> FootprintReport:
         """Clip each raster's footprint to an external geometry.
 
-        The footprint becomes `bounds ∩ source` — computed from the stored
-        bounds every time, so this is re-runnable and can never claim ground
-        outside the file. A raster that the source does not touch at all is
-        *reported* in the result and left alone; that is either a raster to
-        remove or the wrong source, and neither should be decided silently.
+        The footprint becomes `footprint ∩ source`: it can only get tighter, so
+        the same clip twice changes nothing and a raster never claims ground it
+        did not already claim. To start over, re-register the file. A raster
+        that the source does not touch at all is *reported* in the result and
+        left alone; that is either a raster to remove or the wrong source, and
+        neither should be decided silently.
 
         With `apply=False` the report is produced and nothing is written.
         """
@@ -488,9 +491,9 @@ class RasterIndex:
 
         The check that turns a declaration into a dated verification: every
         stored fact about each sampled raster — dtype, bands, CRS, nodata, zoom
-        range, bounds — is compared against a fresh read of the file. Any
-        disagreement is returned rather than raised, so a caller can print all of
-        them at once.
+        range — is compared against a fresh read of the file, and the footprint
+        is checked to lie within it. Any disagreement is returned rather than
+        raised, so a caller can print all of them at once.
         """
         rows = self.rasters(layer)
         if rasters is not None:
@@ -528,8 +531,8 @@ class RasterIndex:
         sql = """
             SELECT id, layer, slug, href, minzoom, maxzoom, dtype, nbands,
                    nodata, crs, ST_AsGeoJSON(footprint) footprint,
-                   ARRAY[ST_XMin(bounds), ST_YMin(bounds),
-                         ST_XMax(bounds), ST_YMax(bounds)] bounds,
+                   ARRAY[ST_XMin(footprint), ST_YMin(footprint),
+                         ST_XMax(footprint), ST_YMax(footprint)] bounds,
                    CAST(info ->> 'nodata_override' AS double precision) nodata_override
             FROM raster_layers.raster
         """
@@ -919,31 +922,27 @@ class RasterIndex:
 # and declaring one cannot drift apart. Keyed on `href`.
 _UPSERT_RASTER = text("""
     INSERT INTO raster_layers.raster
-      (layer, slug, href, footprint, bounds, minzoom, maxzoom, dtype, nbands,
+      (layer, slug, href, footprint, minzoom, maxzoom, dtype, nbands,
        nodata, crs, rescale_range, info)
     VALUES (
       :layer, :slug, :href,
       ST_SetSRID(ST_GeomFromGeoJSON(CAST(:geometry AS text)), 4326),
-      ST_MakeEnvelope(:west, :south, :east, :north, 4326),
       :minzoom, :maxzoom, :dtype, :nbands, :nodata, :crs,
       CAST(:rescale_range AS numeric[]), CAST(:info AS jsonb)
     )
     ON CONFLICT (href) DO UPDATE SET
       layer = excluded.layer,
       slug = excluded.slug,
-      -- A footprint that was deliberately set — clipped to a coastline, traced
-      -- from the mask — survives a plain re-registration of the same file.
-      -- Only a registration that brings a footprint of its own, or a file whose
-      -- bounds have changed, replaces it.
+      -- Re-registering never *widens* a footprint: one that was tightened —
+      -- clipped to a coastline, traced from the mask, declared — survives a
+      -- plain re-read of the same file, whose footprint is just the bounding
+      -- box. A registration that brings a footprint of its own replaces it.
       footprint = CASE
-        WHEN ST_Equals(excluded.footprint, excluded.bounds)
-         AND raster.bounds IS NOT NULL
-         AND ST_Equals(raster.bounds, excluded.bounds)
-         AND NOT ST_Equals(raster.footprint, raster.bounds)
+        WHEN NOT CAST(:explicit_footprint AS boolean)
+         AND ST_Covers(excluded.footprint, raster.footprint)
         THEN raster.footprint
         ELSE excluded.footprint
       END,
-      bounds = excluded.bounds,
       minzoom = excluded.minzoom,
       maxzoom = excluded.maxzoom,
       dtype = excluded.dtype,
@@ -969,7 +968,7 @@ def _raster_row(
     slug: str,
     href: str,
     geometry: dict[str, Any],
-    bounds: tuple[float, float, float, float],
+    explicit_footprint: bool,
     minzoom: Optional[int],
     maxzoom: Optional[int],
     dtype: Optional[str],
@@ -980,16 +979,12 @@ def _raster_row(
     info: dict[str, Any],
 ) -> dict[str, Any]:
     """Bind parameters for `_UPSERT_RASTER`."""
-    west, south, east, north = bounds
     return dict(
         layer=layer,
         slug=slug,
         href=href,
         geometry=json.dumps(geometry),
-        west=west,
-        south=south,
-        east=east,
-        north=north,
+        explicit_footprint=explicit_footprint,
         minzoom=minzoom,
         maxzoom=maxzoom,
         dtype=dtype,
@@ -1097,7 +1092,7 @@ def _float_text(value: Optional[float]) -> Optional[str]:
 
 
 def _bounds(value: Optional[Iterable]) -> Optional[tuple[float, float, float, float]]:
-    """A `bounds` array column as a tuple; None where the row has no bounds yet."""
+    """A footprint-envelope array as a tuple."""
     if value is None:
         return None
     values = [v for v in value]

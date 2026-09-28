@@ -53,10 +53,10 @@ class VerificationReport:
 def compare_declared(row: dict[str, Any], info: RasterInfo) -> list[Mismatch]:
     """Every field on which an indexed row disagrees with a freshly read file.
 
-    `row` is a raster row from the index (`RasterIndex.rasters` shape, plus
-    `bounds`). Compared: dtype, band count, CRS, the file's nodata, the native
-    zoom range and the bounds. The footprint is deliberately not compared —
-    it is expected to be tighter than the file.
+    `row` is a raster row from the index (`RasterIndex.rasters` shape).
+    Compared: dtype, band count, CRS, the file's nodata and the native zoom
+    range. The footprint is checked for *containment*, not equality: it may be
+    far tighter than the file, but it must never claim ground outside it.
     """
     slug, href = row["slug"], row["href"]
     found: list[Mismatch] = []
@@ -72,8 +72,10 @@ def compare_declared(row: dict[str, Any], info: RasterInfo) -> list[Mismatch]:
     check("minzoom", row.get("minzoom"), info.minzoom, lambda a, b: a == b)
     check("maxzoom", row.get("maxzoom"), info.maxzoom, lambda a, b: a == b)
     bounds = row.get("bounds")
-    if bounds is not None:
-        check("bounds", tuple(bounds), tuple(info.bounds), _same_bounds)
+    if bounds is not None and not _within(bounds, info.bounds):
+        found.append(
+            Mismatch(slug, href, "footprint", tuple(bounds), tuple(info.bounds))
+        )
     return found
 
 
@@ -91,5 +93,9 @@ def _same_crs(a: Optional[str], b: Optional[str]) -> bool:
     return a.upper() == b.upper()
 
 
-def _same_bounds(a, b) -> bool:
-    return all(abs(x - y) <= BOUNDS_TOLERANCE for x, y in zip(a, b))
+def _within(footprint_bounds, file_bounds) -> bool:
+    """Whether a footprint's envelope lies inside the file's extent."""
+    west, south, east, north = footprint_bounds
+    fw, fs, fe, fn = file_bounds
+    t = BOUNDS_TOLERANCE
+    return west >= fw - t and south >= fs - t and east <= fe + t and north <= fn + t

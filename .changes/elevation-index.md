@@ -3,14 +3,13 @@ macrostrat.raster_index: minor
 macrostrat.raster_layers: minor
 ---
 
-- `raster_index`: a `bounds` column kept apart from the footprint (schema file
-  `03-raster-bounds.sql`, backfilled from the footprint envelope)
 - `raster_index`: `add_declared()` registers rasters from a declared profile
   without opening them; `verify_sample()` and `verify` check a random sample
   against the files
 - `raster_index`: `set_footprints()` / `set-footprints` clip footprints to an
-  external geometry (a PostGIS table, a GeoJSON file or URL) — always
-  `bounds ∩ source`, re-runnable, empty clips reported rather than stored
+  external geometry (a PostGIS table, a GeoJSON file or URL); a footprint only
+  gets tighter, re-registration never widens one, empty clips are reported
+  rather than stored. No schema change
 - `raster_index`: a per-raster reader nodata override (`set_nodata()` /
   `set-nodata`, `--nodata` on `add` and `scan`), carried on `RasterAsset.nodata`;
   the `nodata` column keeps what the file declares

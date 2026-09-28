@@ -73,8 +73,8 @@ class RasterAsset(BaseModel):
     # the common case, means the file is trusted and the reader stays on its
     # plain path. Set with `RasterIndex.set_nodata`.
     nodata: Optional[float] = None
-    # (west, south, east, north) of the file, in EPSG:4326. Lets a caller that
-    # reads several rasters skip one that cannot hold the points it still
+    # (west, south, east, north) of the footprint, in EPSG:4326. Lets a caller
+    # that reads several rasters skip one that cannot hold the points it still
     # needs, without opening it.
     bounds: Optional[tuple[float, float, float, float]] = None
     # True when the requested tile is zoomed in past what this raster resolves.
@@ -116,7 +116,8 @@ class DeclaredRaster(BaseModel):
 
     href: str
     slug: Optional[str] = None
-    # (west, south, east, north) in EPSG:4326: what the file covers.
+    # (west, south, east, north) in EPSG:4326: what the file covers. Becomes
+    # the footprint unless one is given.
     bounds: tuple[float, float, float, float]
     minzoom: int
     maxzoom: int
