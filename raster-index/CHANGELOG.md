@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.4.0] - 2026-09-28 [_changes_](https://github.com/Macrostrat/python-libraries/compare/macrostrat.raster_index-v0.3.2...macrostrat.raster_index-v0.4.0)
+
+- `raster_index`: `add_declared()` registers rasters from a declared profile
+  without opening them; `verify_sample()` and `verify` check a random sample
+  against the files
+- `raster_index`: `set_footprints()` / `set-footprints` clip footprints to an
+  external geometry (a PostGIS table, a GeoJSON file or URL); a footprint only
+  gets tighter, re-registration never widens one, empty clips are reported
+  rather than stored. No schema change
+- `raster_index`: a per-raster reader nodata override (`set_nodata()` /
+  `set-nodata`, `--nodata` on `add` and `scan`), carried on `RasterAsset.nodata`;
+  the `nodata` column keeps what the file declares
+- `raster_index`: the scale window — `zoom_for_resolution()` /
+  `resolution_for_zoom()`, `zoom` and `scale_aware` on `assets_for_bbox()`,
+  and new `assets_for_point()` (exact against the footprint) and
+  `assets_for_geometry()`. Default ordering is unchanged
+- `raster_index`: `RasterAsset.bounds`; `create_test_dem()` fixture helper
+- `raster_layers`: `PGRasterMosaic` applies each asset's nodata override when
+  opening it, resolves points exactly against footprints rather than through a
+  zoom-14 tile, and takes `scale_aware` / `target_zoom`; `?resolution=` on every
+  mosaic route sets the target
+- `raster_layers`: `sample_point()` and `sample_line()` — one decimated window
+  read per intersecting raster, scale-aware selection, mask-driven validity
+
 ## [0.3.2] - 2026-09-23 [_changes_](https://github.com/Macrostrat/python-libraries/compare/macrostrat.raster_index-v0.3.1...macrostrat.raster_index-v0.3.2)
 
 - Require `macrostrat.database` 4.7.0 or newer.

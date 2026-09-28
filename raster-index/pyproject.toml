@@ -1,6 +1,6 @@
 [project]
 name = "macrostrat.raster_index"
-version = "0.3.2"
+version = "0.4.0"
 description = "An index of cloud-optimized raster datasets, for mosaicked tile serving"
 authors = [{ name = "Daven Quinn", email = "dev@davenquinn.com" }]
 requires-python = ">=3.11,<4"
