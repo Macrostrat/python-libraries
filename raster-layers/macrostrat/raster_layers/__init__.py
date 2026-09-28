@@ -12,6 +12,7 @@ from .layers import (
     install_exception_handlers,
     register_raster_layers,
 )
+from .sampling import Profile, Sample, sample_line, sample_point
 
 __all__ = [
     "PGRasterMosaic",
@@ -25,4 +26,8 @@ __all__ = [
     "fixed_layers",
     "LayerListParams",
     "MVT_MEDIA_TYPE",
+    "Sample",
+    "Profile",
+    "sample_point",
+    "sample_line",
 ]

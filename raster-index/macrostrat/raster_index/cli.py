@@ -321,10 +321,140 @@ def add(
         "--mask-footprints",
         help="Trace footprints from each raster's validity mask (reads the mask)",
     ),
+    nodata: Optional[float] = Option(
+        None,
+        "--nodata",
+        help="Reader nodata override, applied instead of the file's own value",
+    ),
 ):
     """Register rasters in a layer, reading footprints and zoom ranges."""
-    results = index_for(ctx).add_rasters(hrefs, layer, mask_footprint=mask_footprints)
+    results = index_for(ctx).add_rasters(
+        hrefs, layer, mask_footprint=mask_footprints, nodata=nodata
+    )
     print(f"[green]Registered {len(results)}/{len(hrefs)} rasters in {layer}")
+
+
+@cli.command(name="set-nodata")
+def set_nodata(
+    ctx: Context,
+    layer: str,
+    value: Optional[float] = Argument(
+        None, help="The value to treat as missing; omit with --clear"
+    ),
+    slug: Optional[str] = Option(
+        None, "--slug", "-s", help="One raster rather than the whole layer"
+    ),
+    clear: bool = Option(False, "--clear", help="Remove the override"),
+):
+    """Override what the reader treats as nodata, for a layer or one raster.
+
+    The file's own nodata stays recorded; this is the value the serving side
+    passes to the reader instead. SRTM GL1 declares -32768 but stores the ocean
+    as 0, so `set-nodata srtm-gl1 0` is what makes a click in the water fall
+    through to bathymetry rather than returning sea level.
+    """
+    if clear == (value is not None):
+        raise BadParameter("Pass a value, or --clear, but not both")
+    count = index_for(ctx).set_nodata(
+        layer, None if clear else value, rasters=[slug] if slug else None
+    )
+    verb = "Cleared the nodata override on" if clear else f"Set nodata {value!r} on"
+    print(f"[green]{verb} {count} raster(s) in [bold]{layer}[/bold]")
+
+
+@cli.command(name="set-footprints")
+def set_footprints(
+    ctx: Context,
+    layer: str,
+    table: Optional[str] = Option(
+        None, "--from", help="PostGIS table or view of polygons, e.g. public.land"
+    ),
+    geometry_column: str = Option(
+        "geom", "--geometry-column", help="Geometry column of --from"
+    ),
+    file: Optional[str] = Option(None, "--from-file", help="A GeoJSON file"),
+    url: Optional[str] = Option(None, "--from-url", help="A GeoJSON URL"),
+    slug: Optional[str] = Option(
+        None, "--slug", "-s", help="One raster rather than the whole layer"
+    ),
+    dry_run: bool = Option(False, "--dry-run", help="Report without writing"),
+):
+    """Clip footprints to an external geometry, without reading any raster.
+
+    Each footprint becomes `bounds ∩ source`: a land-polygon table for a global
+    terrestrial product, a publisher's survey boundaries for local ones. Always
+    recomputed from the bounds, so it is safe to run again; a raster the source
+    does not touch is reported and left alone.
+    """
+    from .external_footprints import FootprintSource
+
+    sources = [s for s in (table, file, url) if s is not None]
+    if len(sources) != 1:
+        raise BadParameter("Pass exactly one of --from, --from-file or --from-url")
+    if table is not None:
+        source = FootprintSource.table(table, geometry_column)
+    elif file is not None:
+        source = FootprintSource.file(file)
+    else:
+        source = FootprintSource.url(url)
+
+    report = index_for(ctx).set_footprints(
+        layer, source, rasters=[slug] if slug else None, apply=not dry_run
+    )
+    if not report.rows:
+        print(f"[yellow]No rasters in [bold]{layer}[/bold]")
+        raise Exit(1)
+
+    view = Table("Raster", "Coverage of bounds", "Vertices", box=None)
+    for row in report.clipped:
+        view.add_row(row.slug, f"{100 * row.fraction:.1f}%", str(row.vertices))
+    if report.clipped:
+        print(view)
+
+    verb = "Would clip" if dry_run else "Clipped"
+    summary = (
+        f"[green]{verb} {len(report.clipped)} footprint(s) against {report.source}"
+    )
+    if report.whole:
+        summary += f"; {len(report.whole)} lie entirely inside it (bounds kept)"
+    print(summary)
+    if report.empty:
+        print(
+            f"[yellow]{len(report.empty)} raster(s) are entirely outside the source "
+            "and were left alone:"
+        )
+        for row in report.empty:
+            print(f"  {row.slug}")
+
+
+@cli.command(name="verify")
+def verify(
+    ctx: Context,
+    layer: str,
+    sample: int = Option(10, "--sample", "-n", help="How many rasters to open"),
+    seed: Optional[int] = Option(None, "--seed", help="Make the sample repeatable"),
+):
+    """Open a random sample of a layer's rasters and compare them to the index.
+
+    The check behind a declared registration: a profile is an assumption about
+    a published product, and one reprocessed tile with a different nodata would
+    otherwise go unnoticed. Exits non-zero on any disagreement.
+    """
+    report = index_for(ctx).verify_sample(layer, sample=sample, seed=seed)
+    for slug, error in report.unreadable:
+        print(f"[red]{slug}: could not be opened: {error}")
+    for mismatch in report.mismatches:
+        print(f"[red]{mismatch}")
+    if report.ok:
+        print(
+            f"[green]{report.checked} raster(s) in [bold]{layer}[/bold] match the index"
+        )
+        return
+    print(
+        f"[red]{len(report.mismatches)} mismatch(es) and {len(report.unreadable)} "
+        f"unreadable across {report.checked} sampled raster(s)"
+    )
+    raise Exit(1)
 
 
 @cli.command(name="refine-footprints")
@@ -434,6 +564,11 @@ def scan(
             "`refine-footprints` does the same job after the fact."
         ),
     ),
+    nodata: Optional[float] = Option(
+        None,
+        "--nodata",
+        help="Reader nodata override, applied instead of each file's own value",
+    ),
 ):
     """Register every raster under a bucket prefix.
 
@@ -462,7 +597,7 @@ def scan(
         return
 
     results = index_for(ctx).add_rasters(
-        [o.href for o in objects], layer, mask_footprint=mask_footprints
+        [o.href for o in objects], layer, mask_footprint=mask_footprints, nodata=nodata
     )
     print(f"[green]Registered {len(results)}/{len(objects)} rasters in {layer}")
 

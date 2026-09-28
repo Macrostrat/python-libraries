@@ -21,7 +21,7 @@ from titiler.core.utils import render_image
 from titiler.mosaic.factory import MosaicTilerFactory
 from typing_extensions import Annotated
 
-from macrostrat.raster_index import RasterIndex
+from macrostrat.raster_index import RasterIndex, zoom_for_resolution
 from macrostrat.utils import get_logger
 
 from .algorithms import categorical_algorithms
@@ -63,6 +63,10 @@ class DatasetParams(DefaultDependency):
 
     `DefaultDependency.as_dict()` drops `None`, so an absent parameter leaves the
     backend at its default of "every raster in the layer".
+
+    `?resolution=` — a target ground sample distance in metres — arrives the same
+    way and becomes the backend's `target_zoom`, so `/point` and `/part` on a
+    scale-aware layer can be answered at the scale the client is working at.
     """
 
     rasters: Annotated[
@@ -77,11 +81,29 @@ class DatasetParams(DefaultDependency):
         ),
     ] = None
 
+    target_zoom: Annotated[
+        Optional[float],
+        Query(
+            alias="resolution",
+            gt=0,
+            description=(
+                "Target ground sample distance in metres. On a scale-aware layer "
+                "this selects the rasters closest to that scale rather than the "
+                "finest available; a coarse request reads a coarse dataset."
+            ),
+        ),
+    ] = None
+
     def __post_init__(self):
-        """Parse the comma-delimited form into the list the backend wants."""
+        """Parse the query forms into what the backend wants."""
         if isinstance(self.rasters, str):
             slugs = [slug.strip() for slug in self.rasters.split(",") if slug.strip()]
             self.rasters = slugs or None
+        if self.target_zoom is not None:
+            # Converted at the equator: a point or bbox route has no single
+            # latitude to hand, and a one-level error is within the window's
+            # tolerance.
+            self.target_zoom = zoom_for_resolution(float(self.target_zoom))
 
 
 def LayerListParams(
