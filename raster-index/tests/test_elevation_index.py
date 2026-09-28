@@ -323,7 +323,10 @@ class TestExternalFootprints:
             report = index.set_footprints(
                 "land", FootprintSource.table("public.test_land"), apply=False
             )
-            assert {r.slug for r in report.clipped} == {"fine"}
+            # `fine` is already clipped to the same land, so nothing shrinks —
+            # it reports as whole; `elsewhere` is still outside.
+            assert {r.slug for r in report.whole} == {"fine"}
+            assert {r.slug for r in report.empty} == {"elsewhere"}
         finally:
             with index.engine.begin() as conn:
                 conn.execute(text("DROP TABLE public.test_land"))
