@@ -12,11 +12,13 @@ from .changes import (
     LEVELS,
     ChangeError,
     apply_releases,
+    consume_fragments,
+    is_prerelease,
     plan_releases,
     read_fragments,
     write_fragment,
 )
-from .packages import find_packages
+from .packages import find_packages, mono_config
 
 
 def create_changeset(
@@ -71,30 +73,54 @@ def create_changeset(
 
 def apply_versions(
     path: Path = Path.cwd(),
+    package: list[str] = typer.Option(
+        [],
+        "--package",
+        "-p",
+        help="Release only this package. Repeatable. Releases a prerelease as stable.",
+    ),
+    pre: bool = typer.Option(
+        False, "--pre", help="Make prereleases, labelled by tool.mono.prerelease-label."
+    ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Show what would change, without writing anything."
     ),
     lock: bool = typer.Option(True, help="Refresh lock files for changed packages."),
 ):
     """Apply pending change fragments: versions, dependencies, and changelogs."""
+    prerelease = None
+    if pre:
+        prerelease = mono_config(path).get("prerelease-label", "beta")
+
     try:
         fragments = read_fragments(path)
         packages = find_packages(path)
-        releases = plan_releases(fragments, packages, path)
+        releases = plan_releases(
+            fragments, packages, path, prerelease=prerelease, only=package or None
+        )
     except ChangeError as err:
         print(f"[bold red]error:[/] {err}")
         raise SystemExit(1)
 
     if not releases:
         print("[green]No pending changes.")
+        for pkg in packages:
+            if is_prerelease(pkg.version):
+                print(
+                    f"[dim]{pkg.name} is at {pkg.version}; "
+                    f"`mono version -p {pkg.name}` releases it as stable."
+                )
         return
 
     for release in releases:
         reason = " [dim](dependency)[/]" if release.cascaded else ""
+        level = release.level
+        if is_prerelease(release.from_version) and not release.bullets:
+            level = "stable"
         print(
             f"[cyan]{release.package.name}[/] "
             f"{release.from_version} → [bold]{release.to_version}[/] "
-            f"({release.level}){reason}"
+            f"({level}){reason}"
         )
 
     if dry_run:
@@ -102,13 +128,12 @@ def apply_versions(
         return
 
     apply_releases(releases, path)
-
-    for fragment in fragments:
-        fragment.path.unlink()
+    consume_fragments(fragments, {r.package.name for r in releases})
 
     if lock:
         for release in releases:
-            cmd("uv lock", cwd=release.package.path)
+            if release.package.is_python:
+                cmd("uv lock", cwd=release.package.path)
         cmd("uv lock", cwd=path)
 
     print("\nApplied. Review the diff, then commit the version change.")

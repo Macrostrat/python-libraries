@@ -19,7 +19,7 @@ from rich import print
 from macrostrat.utils import cmd
 from macrostrat.utils.shell import git_has_changes
 
-from .packages import Package, find_packages, is_published
+from .packages import Package, find_packages, is_published, released_by
 
 
 def build_module(pkg: Package):
@@ -71,6 +71,10 @@ def publish_packages(
     ),
 ):
     """Publish all packages whose version is not yet on PyPI."""
+    if released_by(path) == "tag":
+        print("[red]Releases in this repository are tagged by CI on merge to main.")
+        raise SystemExit(1)
+
     packages = modules_to_publish(find_packages(path), omit)
 
     if not packages:

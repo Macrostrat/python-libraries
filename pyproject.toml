@@ -41,6 +41,8 @@ default-groups = "all"
 # How far to move a package when a sibling it depends on is released.
 # One of "patch", "minor", "major", or "none" to leave dependents alone.
 update-internal-dependencies = "patch"
+# Changelog headings link to a comparison of release tags here.
+repository = "https://github.com/Macrostrat/python-libraries"
 
 [tool.uv.sources]
 "macrostrat.app_frame" = { path = "./app-frame", editable = true }

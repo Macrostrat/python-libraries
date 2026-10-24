@@ -1,9 +1,14 @@
 """Discovery and metadata for the packages in this monorepo.
 
 Packages are found through the root ``pyproject.toml``'s ``[tool.uv.sources]``
-table, which is the same list that ``mono install`` operates on.
+table, which is the same list that ``mono install`` operates on. A repository
+whose releasable units are not uv sources (deployed services, say) lists them
+instead as directory globs in ``[tool.mono] packages``; each is then named by
+its directory, and may keep its version in ``package.json``.
 """
 
+import json
+import subprocess
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
@@ -14,7 +19,6 @@ from packaging.version import InvalidVersion, Version
 from toml import load
 
 PRIVATE_CLASSIFIER = "Private :: Do Not Upload"
-REPO_BASE_URL = "https://github.com/Macrostrat/python-libraries"
 
 
 def load_pkg_config(fp: Path) -> dict:
@@ -29,6 +33,27 @@ def get_local_dependencies(pkg_cfg: dict) -> dict:
     return pkg_cfg["tool"]["uv"]["sources"]
 
 
+def mono_config(root: Path) -> dict:
+    return load_pkg_config(root).get("tool", {}).get("mono", {})
+
+
+def package_setting(root: Path, name: str, key: str, default=None):
+    """A ``[tool.mono]`` setting, as overridden for one package."""
+    cfg = mono_config(root)
+    override = cfg.get("overrides", {}).get(name, {})
+    return override.get(key, cfg.get(key, default))
+
+
+def released_by(root: Path) -> str:
+    """How a version is released: published to PyPI, or tagged in git by CI."""
+    setting = mono_config(root).get("released-by", "pypi")
+    if setting not in ("pypi", "tag"):
+        raise ValueError(
+            f"tool.mono.released-by must be 'pypi' or 'tag' (got '{setting}')"
+        )
+    return setting
+
+
 @dataclass
 class Package:
     name: str
@@ -36,11 +61,26 @@ class Package:
 
     @cached_property
     def config(self) -> dict:
-        return load_pkg_config(self.path)
+        if self.is_python:
+            return load_pkg_config(self.path)
+        return json.loads(self.version_file.read_text())
 
     @property
-    def pyproject_file(self) -> Path:
-        return self.path / "pyproject.toml"
+    def version_file(self) -> Path:
+        pyproject = self.path / "pyproject.toml"
+        if pyproject.exists():
+            return pyproject
+        return self.path / "package.json"
+
+    @property
+    def is_python(self) -> bool:
+        return self.version_file.name == "pyproject.toml"
+
+    @property
+    def project(self) -> dict:
+        if self.is_python:
+            return self.config["project"]
+        return self.config
 
     @property
     def changelog_file(self) -> Path:
@@ -48,11 +88,11 @@ class Package:
 
     @property
     def version(self) -> str:
-        return self.config["project"]["version"]
+        return self.project["version"]
 
     @property
     def classifiers(self) -> Optional[list[str]]:
-        return self.config["project"].get("classifiers")
+        return self.project.get("classifiers")
 
     @property
     def is_private(self) -> bool:
@@ -63,7 +103,10 @@ class Package:
 
     @property
     def dependencies(self) -> list[str]:
-        return self.config["project"].get("dependencies", [])
+        # Only Python requirements take part in the dependency cascade.
+        if not self.is_python:
+            return []
+        return self.project.get("dependencies", [])
 
     @property
     def version_string(self) -> str:
@@ -74,16 +117,20 @@ class Package:
         return f"{self.name}-v{self.version}"
 
     def read_text(self) -> str:
-        return self.pyproject_file.read_text()
+        return self.version_file.read_text()
 
     def write_text(self, text: str):
-        self.pyproject_file.write_text(text)
+        self.version_file.write_text(text)
         # The config on disk has changed; drop the memoized copy.
         self.__dict__.pop("config", None)
 
 
 def find_packages(root: Path = Path.cwd()) -> list[Package]:
     """All monorepo packages, in the order they appear in the root config."""
+    patterns = mono_config(root).get("packages")
+    if patterns is not None:
+        return find_package_directories(root, patterns)
+
     sources = get_local_dependencies(load_pkg_config(root))
     packages = []
     for name, source in sources.items():
@@ -91,6 +138,19 @@ def find_packages(root: Path = Path.cwd()) -> list[Package]:
         if path is None:
             continue
         packages.append(Package(name=name, path=(root / path).resolve()))
+    return packages
+
+
+def find_package_directories(root: Path, patterns: list[str]) -> list[Package]:
+    packages = []
+    for pattern in patterns:
+        for path in sorted(root.glob(pattern)):
+            if (
+                not (path / "pyproject.toml").exists()
+                and not (path / "package.json").exists()
+            ):
+                continue
+            packages.append(Package(name=path.name, path=path.resolve()))
     return packages
 
 
@@ -111,21 +171,48 @@ def published_versions(name: str) -> set[str]:
     return set(response.json().get("releases", {}).keys())
 
 
-def latest_published_version(name: str) -> Optional[str]:
-    versions = []
-    for text in published_versions(name):
+def tagged_versions(pkg: Package, root: Path) -> set[str]:
+    """Versions of a package that have a release tag on the remote."""
+    # Ask the remote, so an unfetched checkout answers the way CI will
+    prefix = f"refs/tags/{pkg.name}-v"
+    res = subprocess.run(
+        ["git", "ls-remote", "--tags", "origin", f"{prefix}*"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    versions = set()
+    for line in res.stdout.splitlines():
+        ref = line.split()[-1].removesuffix("^{}")
+        versions.add(ref.removeprefix(prefix))
+    return versions
+
+
+def released_versions(pkg: Package, root: Path) -> set[str]:
+    if released_by(root) == "tag":
+        return tagged_versions(pkg, root)
+    return published_versions(pkg.name)
+
+
+def latest_version(versions: set[str]) -> Optional[str]:
+    parsed = []
+    for text in versions:
         try:
-            versions.append(Version(text))
+            parsed.append((Version(text), text))
         except InvalidVersion:
             continue
-    if not versions:
+    if not parsed:
         return None
-    return str(max(versions))
+    return max(parsed)[1]
 
 
 def is_published(pkg: Package) -> bool:
     return pkg.version in published_versions(pkg.name)
 
 
-def compare_url(from_tag: str, to_tag: str) -> str:
-    return f"{REPO_BASE_URL}/compare/{from_tag}...{to_tag}"
+def compare_url(root: Path, from_tag: str, to_tag: str) -> Optional[str]:
+    repository = mono_config(root).get("repository")
+    if repository is None:
+        return None
+    return f"{repository.rstrip('/')}/compare/{from_tag}...{to_tag}"
