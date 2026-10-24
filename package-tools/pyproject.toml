@@ -1,6 +1,6 @@
 [project]
 name = "macrostrat.package_tools"
-version = "2.1.0"
+version = "2.2.0"
 description = "Tools for managing Python packages in a monorepo"
 authors = [{ name = "Daven Quinn", email = "dev@davenquinn.com" }]
 requires-python = ">=3.10,<4"

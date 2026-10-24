@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.11, <3.14"
 resolution-markers = [
     "python_full_version >= '3.12'",
@@ -782,7 +782,7 @@ dev = [
 
 [[package]]
 name = "macrostrat-package-tools"
-version = "2.1.0"
+version = "2.2.0"
 source = { editable = "package-tools" }
 dependencies = [
     { name = "macrostrat-utils" },
@@ -810,6 +810,7 @@ dev = [{ name = "macrostrat-utils", editable = "utils" }]
 name = "macrostrat-python-libraries"
 version = "1.4.0"
 source = { virtual = "." }
+default-groups = "all"
 dependencies = [
     { name = "setuptools" },
 ]
