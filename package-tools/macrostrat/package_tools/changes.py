@@ -13,7 +13,8 @@ Add `copy_settings` to `template_database`.
 
 ``mono version`` consumes every fragment, raises the affected packages'
 versions, cascades to their dependents within the monorepo, writes each
-package's ``CHANGELOG.md``, and removes the fragments it applied.
+package's ``CHANGELOG.md``, and removes the fragments it applied. With
+``--pre`` it makes prereleases (``1.3.0-beta.1``) instead.
 """
 
 import re
@@ -25,10 +26,17 @@ from typing import Optional
 
 from packaging.version import Version
 
-from .packages import Package, compare_url, find_packages, load_pkg_config
+from .packages import (
+    Package,
+    compare_url,
+    find_packages,
+    load_pkg_config,
+    package_setting,
+)
 
 CHANGES_DIR = ".changes"
 LEVELS = ["patch", "minor", "major"]
+CHANGELOG_MODES = ["versions", "unreleased"]
 
 ADJECTIVES = [
     "brave",
@@ -131,6 +139,11 @@ def fragment_name() -> str:
     return f"{choice(ADJECTIVES)}-{choice(NOUNS)}"
 
 
+def fragment_text(bumps: dict[str, str], description: str) -> str:
+    frontmatter = "\n".join(f"{name}: {level}" for name, level in bumps.items())
+    return f"---\n{frontmatter}\n---\n\n{description.strip()}\n"
+
+
 def write_fragment(root: Path, bumps: dict[str, str], description: str) -> Path:
     directory = changes_dir(root)
     directory.mkdir(exist_ok=True)
@@ -138,9 +151,18 @@ def write_fragment(root: Path, bumps: dict[str, str], description: str) -> Path:
     while path.exists():
         path = directory / f"{fragment_name()}.md"
 
-    frontmatter = "\n".join(f"{name}: {level}" for name, level in bumps.items())
-    path.write_text(f"---\n{frontmatter}\n---\n\n{description.strip()}\n")
+    path.write_text(fragment_text(bumps, description))
     return path
+
+
+def consume_fragments(fragments: list[Fragment], released: set[str]):
+    """Remove applied entries; a fragment naming an unreleased package keeps that entry."""
+    for fragment in fragments:
+        remaining = {k: v for k, v in fragment.bumps.items() if k not in released}
+        if not remaining:
+            fragment.path.unlink()
+        elif remaining != fragment.bumps:
+            fragment.path.write_text(fragment_text(remaining, fragment.description))
 
 
 def max_level(a: Optional[str], b: str) -> str:
@@ -149,14 +171,45 @@ def max_level(a: Optional[str], b: str) -> str:
     return LEVELS[max(LEVELS.index(a), LEVELS.index(b))]
 
 
-def next_version(current: str, level: str) -> str:
+def stable_target(current: str, level: str) -> str:
+    """The stable version a change of `level` leads to."""
     version = Version(current)
     major, minor, patch = (list(version.release) + [0, 0, 0])[:3]
-    if level == "major":
+    if version.pre is None:
+        if level == "major":
+            return f"{major + 1}.0.0"
+        if level == "minor":
+            return f"{major}.{minor + 1}.0"
+        return f"{major}.{minor}.{patch + 1}"
+
+    # A prerelease already carries its bump, as in npm's semver: 1.3.0-beta.2
+    # absorbs a minor change, but a major one moves it to 2.0.0.
+    base = f"{major}.{minor}.{patch}"
+    if level == "major" and (minor, patch) != (0, 0):
         return f"{major + 1}.0.0"
-    if level == "minor":
+    if level == "minor" and patch != 0:
         return f"{major}.{minor + 1}.0"
-    return f"{major}.{minor}.{patch + 1}"
+    return base
+
+
+def next_version(current: str, level: str, prerelease: Optional[str] = None) -> str:
+    """The next version, written in semver form (`1.3.0-beta.1`) for prereleases."""
+    target = stable_target(current, level)
+    if prerelease is None:
+        return target
+
+    version = Version(current)
+    same_label = (
+        version.pre is not None
+        and Version(f"0.0.0-{prerelease}.1").pre[0] == version.pre[0]
+    )
+    if same_label and target == version.base_version:
+        return f"{target}-{prerelease}.{version.pre[1] + 1}"
+    return f"{target}-{prerelease}.1"
+
+
+def is_prerelease(version: str) -> bool:
+    return Version(version).is_prerelease
 
 
 # --- applying a set of fragments -------------------------------------------
@@ -198,10 +251,22 @@ def dependency_specifier(pkg: Package, dependency: str) -> Optional[str]:
 
 
 def plan_releases(
-    fragments: list[Fragment], packages: list[Package], root: Path = Path.cwd()
+    fragments: list[Fragment],
+    packages: list[Package],
+    root: Path = Path.cwd(),
+    *,
+    prerelease: Optional[str] = None,
+    only: Optional[list[str]] = None,
 ) -> list[Release]:
-    """Work out which packages move, how far, and why."""
+    """Work out which packages move, how far, and why.
+
+    `only` limits the release to the named packages. Naming a package at a
+    prerelease with no pending changes releases its stable version.
+    """
     by_name = {pkg.name: pkg for pkg in packages}
+    for name in only or []:
+        if name not in by_name:
+            raise ChangeError(f"'{name}' is not a package in this repository")
 
     levels: dict[str, str] = {}
     bullets: dict[str, list[str]] = {}
@@ -211,8 +276,19 @@ def plan_releases(
                 raise ChangeError(
                     f"{fragment.path.name} names unknown package '{name}'"
                 )
+            if only is not None and name not in only:
+                continue
             levels[name] = max_level(levels.get(name), level)
             bullets.setdefault(name, []).extend(fragment.bullets)
+
+    if prerelease is None:
+        for name in only or []:
+            if name not in levels and is_prerelease(by_name[name].version):
+                levels[name] = "patch"
+
+    for name in only or []:
+        if name not in levels:
+            raise ChangeError(f"{name} has no pending changes to release")
 
     directly_changed = set(levels)
 
@@ -243,7 +319,7 @@ def plan_releases(
                 package=pkg,
                 level=level,
                 from_version=pkg.version,
-                to_version=next_version(pkg.version, level),
+                to_version=next_version(pkg.version, level, prerelease),
                 bullets=bullets.get(pkg.name, []),
                 cascaded=pkg.name not in directly_changed,
             )
@@ -252,16 +328,15 @@ def plan_releases(
 
 
 def set_version(pkg: Package, version: str):
-    text = pkg.read_text()
+    if pkg.is_python:
+        pattern, replacement = r'^version\s*=\s*"[^"]+"', f'version = "{version}"'
+    else:
+        pattern, replacement = r'^(\s*"version"\s*:\s*)"[^"]+"', rf'\g<1>"{version}"'
     new_text, count = re.subn(
-        r'^version\s*=\s*"[^"]+"',
-        f'version = "{version}"',
-        text,
-        count=1,
-        flags=re.MULTILINE,
+        pattern, replacement, pkg.read_text(), count=1, flags=re.MULTILINE
     )
     if count != 1:
-        raise ChangeError(f"Could not find a version field in {pkg.pyproject_file}")
+        raise ChangeError(f"Could not find a version field in {pkg.version_file}")
     pkg.write_text(new_text)
 
 
@@ -277,33 +352,84 @@ def raise_dependency_floor(pkg: Package, dependency: str, version: str) -> bool:
     return True
 
 
-def changelog_header(release: Release) -> str:
+UNRELEASED_HEADING = re.compile(
+    r"^## \[?Unreleased\]?[^\n]*\n?", re.MULTILINE | re.IGNORECASE
+)
+NEXT_HEADING = re.compile(r"^## ", re.MULTILINE)
+
+
+def changelog_mode(root: Path, pkg: Package) -> str:
+    """`versions`: a heading per release. `unreleased`: prereleases collect under
+    `## [Unreleased]`, which a stable release turns into its heading."""
+    mode = package_setting(root, pkg.name, "changelog", "versions")
+    if mode not in CHANGELOG_MODES:
+        raise ChangeError(
+            f"tool.mono changelog for {pkg.name} must be one of "
+            f"{', '.join(CHANGELOG_MODES)} (got '{mode}')"
+        )
+    return mode
+
+
+def changelog_header(release: Release, root: Path) -> str:
     header = f"## [{release.to_version}] - {date.today().isoformat()}"
     from_tag = f"{release.package.name}-v{release.from_version}"
     to_tag = f"{release.package.name}-v{release.to_version}"
-    return f"{header} [_changes_]({compare_url(from_tag, to_tag)})"
+    url = compare_url(root, from_tag, to_tag)
+    if url is None:
+        return header
+    return f"{header} [_changes_]({url})"
 
 
-def write_changelog(release: Release, extra_bullets: list[str]):
-    path = release.package.changelog_file
-    existing = path.read_text() if path.exists() else "# Changelog\n"
-
-    bullets = release.bullets + extra_bullets
-    if not bullets:
-        bullets = ["- Maintenance release."]
-
-    entry = changelog_header(release) + "\n\n" + "\n".join(bullets) + "\n"
-
+def insert_below_title(existing: str, entry: str) -> str:
     lines = existing.splitlines()
-    # Insert below the top-level title, if there is one.
     if lines and lines[0].startswith("# "):
         head = "\n".join(lines[:1])
         tail = "\n".join(lines[1:]).lstrip("\n")
-        new_text = f"{head}\n\n{entry}\n{tail}".rstrip() + "\n"
+        return f"{head}\n\n{entry}\n{tail}".rstrip() + "\n"
+    return f"# Changelog\n\n{entry}\n{existing.lstrip()}".rstrip() + "\n"
+
+
+def write_changelog(
+    release: Release, extra_bullets: list[str], root: Path = Path.cwd()
+):
+    path = release.package.changelog_file
+    existing = path.read_text() if path.exists() else "# Changelog\n"
+    bullets = release.bullets + extra_bullets
+
+    if changelog_mode(root, release.package) == "unreleased":
+        new_text = write_unreleased(existing, release, bullets, root)
     else:
-        new_text = f"# Changelog\n\n{entry}\n{existing.lstrip()}".rstrip() + "\n"
+        if not bullets:
+            bullets = ["- Maintenance release."]
+        entry = changelog_header(release, root) + "\n\n" + "\n".join(bullets) + "\n"
+        new_text = insert_below_title(existing, entry)
 
     path.write_text(new_text)
+
+
+def write_unreleased(
+    existing: str, release: Release, bullets: list[str], root: Path
+) -> str:
+    match = UNRELEASED_HEADING.search(existing)
+    if match is None:
+        existing = insert_below_title(existing, "## [Unreleased]\n")
+        match = UNRELEASED_HEADING.search(existing)
+
+    following = NEXT_HEADING.search(existing, match.end())
+    end = following.start() if following else len(existing)
+    entries = existing[match.end() : end].strip("\n")
+    if bullets:
+        entries = "\n".join(filter(None, [entries, *bullets]))
+
+    section = "## [Unreleased]\n\n"
+    if not is_prerelease(release.to_version):
+        section += changelog_header(release, root) + "\n\n"
+        if not entries:
+            entries = "- Maintenance release."
+    if entries:
+        section += entries + "\n\n"
+
+    return (existing[: match.start()] + section + existing[end:]).rstrip() + "\n"
 
 
 def apply_releases(releases: list[Release], root: Path = Path.cwd()):
@@ -325,4 +451,4 @@ def apply_releases(releases: list[Release], root: Path = Path.cwd()):
                 )
 
     for release in releases:
-        write_changelog(release, extra_bullets.get(release.package.name, []))
+        write_changelog(release, extra_bullets.get(release.package.name, []), root)

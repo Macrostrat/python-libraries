@@ -2,7 +2,8 @@
 
 This is meant to run on every pull request. It answers the question that was
 previously only answerable at publish time: *which packages will be published
-when this merges, and is everything they need in place?*
+when this merges, and is everything they need in place?* Where CI releases by
+tagging (``released-by = "tag"``), "published" means a release tag exists.
 """
 
 import re
@@ -14,12 +15,19 @@ from rich.table import Table
 
 from macrostrat.utils import cmd
 
-from .changes import ChangeError, plan_releases, read_fragments
+from .changes import (
+    ChangeError,
+    changelog_mode,
+    is_prerelease,
+    plan_releases,
+    read_fragments,
+)
 from .packages import (
     Package,
     find_packages,
-    latest_published_version,
-    published_versions,
+    latest_version,
+    released_by,
+    released_versions,
 )
 
 
@@ -47,9 +55,19 @@ def lockfile_is_current(pkg_dir: Path) -> bool:
     return res.returncode == 0
 
 
-def check_package(pkg: Package, report: Report, *, check_locks: bool) -> str:
+def needs_changelog_heading(pkg: Package, root: Path) -> bool:
+    # Prereleases collect under [Unreleased] until the stable release
+    if changelog_mode(root, pkg) == "unreleased":
+        return not is_prerelease(pkg.version)
+    return True
+
+
+def check_package(
+    pkg: Package, released: set[str], report: Report, root: Path, *, check_locks: bool
+) -> str:
     """Check one package, and return what publishing will do with it."""
-    if pkg.is_private:
+    tagged = released_by(root) == "tag"
+    if pkg.is_private and not tagged:
         if pkg.classifiers is None:
             report.warn(
                 f"{pkg.name} has no classifiers, so it will never be published. "
@@ -57,22 +75,25 @@ def check_package(pkg: Package, report: Report, *, check_locks: bool) -> str:
             )
         return "private"
 
-    published = published_versions(pkg.name)
-    if pkg.version in published:
+    if pkg.version in released:
         return "up to date"
 
     if not pkg.changelog_file.exists():
         report.error(f"{pkg.name} has no CHANGELOG.md")
-    elif not changelog_has_version(pkg, pkg.version):
+    elif needs_changelog_heading(pkg, root) and not changelog_has_version(
+        pkg, pkg.version
+    ):
         report.error(
             f"{pkg.name} moved to {pkg.version} with no CHANGELOG entry for it"
         )
 
-    if check_locks and not lockfile_is_current(pkg.path):
+    if check_locks and pkg.is_python and not lockfile_is_current(pkg.path):
         report.error(
             f"{pkg.name} has a stale uv.lock — run `uv lock` in {pkg.path.name}/"
         )
 
+    if tagged:
+        return "will tag"
     return "will publish"
 
 
@@ -97,13 +118,14 @@ def show_status(
     table = Table(title="Release status", title_justify="left")
     table.add_column("Package")
     table.add_column("Local")
-    table.add_column("PyPI")
+    table.add_column("Tagged" if released_by(path) == "tag" else "PyPI")
     table.add_column("On merge")
     table.add_column("Pending changes")
 
     for pkg in packages:
-        action = check_package(pkg, report, check_locks=check_locks)
-        latest = latest_published_version(pkg.name) or "—"
+        released = released_versions(pkg, path)
+        action = check_package(pkg, released, report, path, check_locks=check_locks)
+        latest = latest_version(released) or "—"
         release = pending.get(pkg.name)
         if release is None:
             planned = "—"
@@ -113,6 +135,7 @@ def show_status(
 
         style = {
             "will publish": "[bold green]will publish[/]",
+            "will tag": "[bold green]will tag[/]",
             "up to date": "[dim]up to date[/]",
             "private": "[dim]private[/]",
         }[action]
