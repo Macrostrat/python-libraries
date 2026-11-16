@@ -291,7 +291,7 @@ dev = [{ name = "macrostrat-utils", editable = "../utils" }]
 
 [[package]]
 name = "macrostrat-dinosaur"
-version = "4.2.2"
+version = "4.3.0"
 source = { editable = "." }
 default-groups = "all"
 dependencies = [
