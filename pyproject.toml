@@ -15,6 +15,7 @@ dev = [
     "macrostrat.database",
     "macrostrat.dinosaur",
     "macrostrat.package_tools",
+    "macrostrat.schema_management",
     "macrostrat.utils",
     "macrostrat.auth_system",
     "macrostrat.raster_index",
@@ -49,6 +50,7 @@ repository = "https://github.com/Macrostrat/python-libraries"
 "macrostrat.database" = { path = "./database", editable = true }
 "macrostrat.dinosaur" = { path = "./dinosaur", editable = true }
 "macrostrat.package_tools" = { path = "./package-tools", editable = true }
+"macrostrat.schema_management" = { path = "./schema-management", editable = true }
 "macrostrat.utils" = { path = "./utils", editable = true }
 "macrostrat.auth_system" = { path = "./auth-system", editable = true }
 "macrostrat.raster_index" = { path = "./raster-index", editable = true }
