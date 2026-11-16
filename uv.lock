@@ -679,7 +679,7 @@ requires-dist = [
 
 [[package]]
 name = "macrostrat-auth-system"
-version = "1.1.1"
+version = "1.2.0"
 source = { editable = "auth-system" }
 dependencies = [
     { name = "bcrypt" },

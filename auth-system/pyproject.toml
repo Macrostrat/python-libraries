@@ -1,6 +1,6 @@
 [project]
 name = "macrostrat.auth_system"
-version = "1.1.1"
+version = "1.2.0"
 description = "Authentication system for Macrostrat and related apps"
 authors = [{ name = "Daven Quinn", email = "code@davenquinn.com" }]
 requires-python = ">=3.10,<4"

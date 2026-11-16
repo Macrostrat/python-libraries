@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.2.0] - 2026-11-16 [_changes_](https://github.com/Macrostrat/python-libraries/compare/macrostrat.auth_system-v1.1.1...macrostrat.auth_system-v1.2.0)
+
+- Add `macrostrat.auth_system.session`: ORCID sign-in routes, JWT session cookies and a FastAPI session dependency over an application-supplied `UserStore`.
+- Session tokens can name an audience (`AuthSettings.audience`, `JWT_AUDIENCE`); tokens for another audience are refused.
+
 ## [1.1.1] - 2026-09-23 [_changes_](https://github.com/Macrostrat/python-libraries/compare/macrostrat.auth_system-v1.1.0...macrostrat.auth_system-v1.1.1)
 
 - Require `macrostrat.database` 4.7.0 or newer.
