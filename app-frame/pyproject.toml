@@ -19,6 +19,7 @@ dependencies = [
     "rich>=13,<16",
     "typer>=0.12.5,<0.27",
     "packaging>=24.1,<25",
+    "tomli>=2,<3; python_version < '3.11'",
 ]
 
 [project.scripts]
