@@ -39,13 +39,19 @@ from .config import (
     read_config,
 )
 from .policy import (
+    DEFAULT_ENV,
+    DEFAULT_GATES,
+    DEFAULT_TTL,
+    WRITE_SCOPES,
     AccessScope,
     EnvironmentClass,
     EnvironmentPolicy,
+    InvalidDuration,
     WriteGate,
     classes_up_to,
     format_duration,
     parse_duration,
+    parse_gate,
     policy_from_table,
 )
 from .state import ActiveEnvironment, EnvironmentState, extract_env_from_argv

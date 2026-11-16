@@ -64,13 +64,18 @@ def require_environment(
     *,
     command_name: str,
     action: Optional[str] = None,
+    interactive: Optional[Callable[[], bool]] = None,
+    ask: Optional[Callable[[str], str]] = None,
 ) -> None:
     """Confirm a *lapsed* environment before it is used, or raise.
 
     A fresh, explicit or absent environment passes at once. A lapsed one asks
     once at a terminal (yes renews a remembered environment's time-to-live) and
-    is refused without one.
+    is refused without one. *interactive* and *ask* replace the terminal check
+    and the prompt, for an application with its own.
     """
+    interactive = interactive or is_interactive
+    ask = ask or prompt
     active = state.active
     if active is None or not active.needs_approval:
         return None
@@ -84,7 +89,7 @@ def require_environment(
     if action:
         what = f" before {action}"
 
-    if not is_interactive():
+    if not interactive():
         raise StaleEnvironment(
             f"The {active.source} environment {env} ({klass}) lapsed {lapsed_for} ago",
             details=(
@@ -96,12 +101,12 @@ def require_environment(
 
     if active.source == "remembered":
         grant = format_duration(policy.ttl)
-        answer = prompt(
+        answer = ask(
             f"Remembered environment {env} ({klass}) lapsed {lapsed_for} ago. "
             f"Keep using it for another {grant}? [y/N] "
         )
     else:
-        answer = prompt(
+        answer = ask(
             f"Shell environment {env} ({klass}) lapsed {lapsed_for} ago. "
             "Use it for this command? [y/N] "
         )
@@ -125,6 +130,8 @@ def require_access(
     assume_yes: bool = False,
     action: Optional[str] = None,
     reauthorize: Optional[Callable[[AccessScope], None]] = None,
+    interactive: Optional[Callable[[], bool]] = None,
+    ask: Optional[Callable[[str], str]] = None,
 ) -> None:
     """Authorize access of *scope* under *policy*, or raise `AccessRefused`.
 
@@ -132,7 +139,10 @@ def require_access(
     ignored. *assume_yes* (a per-invocation ``--yes``) satisfies only the
     ``prompt`` level. *reauthorize* is called for the ``reauthorize`` level,
     after the name has been typed; without it that level cannot be satisfied.
+    *interactive* and *ask* replace the terminal check and the prompt.
     """
+    interactive = interactive or is_interactive
+    ask = ask or prompt
     scope = AccessScope(scope)
     gate = policy.gate_for(scope)
     env = policy.name or "<no environment>"
@@ -158,7 +168,7 @@ def require_access(
         if assume_yes:
             log.warning("Proceeding with %s in %s (%s): --yes.", what, env, klass)
             return None
-        if not is_interactive():
+        if not interactive():
             bypass = ", or pass --yes"
             if scope == AccessScope.Read:
                 bypass = ""
@@ -169,10 +179,20 @@ def require_access(
                     f"on. Re-run it interactively{bypass}.{inferred}"
                 ),
             )
-        answer = prompt(f"{what.capitalize()} in {env}. Proceed? [y/N] ")
+        answer = ask(f"{what.capitalize()} in {env}. Proceed? [y/N] ")
         if answer.lower() not in ("y", "yes"):
             raise AccessRefused(f"{what.capitalize()} in {env} was declined")
         return None
+
+    if not interactive():
+        raise AccessRefused(
+            f"Refusing {what} in {env} ({klass})",
+            details=(
+                f"The {gate.value!r} level guarding {scope.value} access here "
+                "requires an interactive terminal. There is no flag or "
+                f"environment variable that satisfies it.{inferred}"
+            ),
+        )
 
     if gate == WriteGate.Escalate and reauthorize is None:
         raise AccessRefused(
@@ -184,17 +204,7 @@ def require_access(
             ),
         )
 
-    if not is_interactive():
-        raise AccessRefused(
-            f"Refusing {what} in {env} ({klass})",
-            details=(
-                f"The {gate.value!r} level guarding {scope.value} access here "
-                "requires an interactive terminal. No flag or environment "
-                f"variable satisfies it.{inferred}"
-            ),
-        )
-
-    typed = prompt(
+    typed = ask(
         f"{what.capitalize()} in {env} ({klass}). "
         "Type the environment name to proceed: "
     )

@@ -652,19 +652,28 @@ class MigrationRunner:
                 _res.add(_migration.name)
         return _res
 
-    def run_to_completion(self, *, legacy=False, raise_errors=False) -> MigrationResult:
-        """Apply repeatedly until nothing more can apply; for a scratch database."""
+    def run_to_completion(
+        self, *, legacy=False, raise_errors=False, readiness_level=None
+    ) -> MigrationResult:
+        """Apply repeatedly until nothing more can apply; for a scratch database.
+
+        With `readiness_level`, only migrations at or above it count as remaining.
+        """
         t_start = time()
         n_total = 0
         completed: set[str] = set()
-        remaining = self.applyable(allow_destructive=True, legacy=legacy)
+
+        def applyable():
+            return self.applyable(
+                allow_destructive=True, legacy=legacy, readiness_level=readiness_level
+            )
+
+        remaining = applyable()
         while remaining:
             n_applied, done = self.run(apply=True, data_changes=True, legacy=legacy)
             n_total += n_applied
             completed |= done
-            following = (
-                self.applyable(allow_destructive=True, legacy=legacy) - completed
-            )
+            following = applyable() - completed
             if following == remaining:
                 print("No changes in applyable migrations, exiting")
                 if raise_errors:

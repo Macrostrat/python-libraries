@@ -133,13 +133,14 @@ class EnvironmentState:
     def state_file(self) -> Path:
         return self.state_dir / "environment.json"
 
-    def _read(self) -> dict:
+    def read_state(self) -> dict:
+        """The stored state. Override, with `write_state`, to keep it elsewhere."""
         try:
             return json.loads(self.state_file.read_text())
         except (OSError, ValueError):
             return {}
 
-    def _write(self, state: dict):
+    def write_state(self, state: dict):
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.state_file.write_text(json.dumps(state, indent=2))
 
@@ -147,7 +148,7 @@ class EnvironmentState:
 
     def remembered(self) -> Optional[ActiveEnvironment]:
         """The pointer as written, whether or not it applies here."""
-        state = self._read()
+        state = self.read_state()
         env = state.get(ACTIVE_ENV_KEY)
         if env is None:
             return None
@@ -171,7 +172,7 @@ class EnvironmentState:
     ) -> Optional[datetime]:
         """Remember *env* for *config_file*; None forgets. Returns the expiry."""
         if env is None:
-            self._write({})
+            self.write_state({})
             self.active = None
             return None
         state = {ACTIVE_ENV_KEY: env}
@@ -181,7 +182,7 @@ class EnvironmentState:
         if expires_in is not None:
             expires = _now() + expires_in
             state[ACTIVE_ENV_EXPIRES_KEY] = expires.isoformat()
-        self._write(state)
+        self.write_state(state)
         self.active = ActiveEnvironment(
             name=env, source="remembered", expires=expires, config_file=config_file
         )
@@ -196,11 +197,11 @@ class EnvironmentState:
         if expires_in is not None:
             expires = _now() + expires_in
         if active.source == "remembered":
-            state = self._read()
+            state = self.read_state()
             state.pop(ACTIVE_ENV_EXPIRES_KEY, None)
             if expires is not None:
                 state[ACTIVE_ENV_EXPIRES_KEY] = expires.isoformat()
-            self._write(state)
+            self.write_state(state)
         active.expires = expires
         active.approved = True
         return expires
