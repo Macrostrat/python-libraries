@@ -11,6 +11,13 @@ system. It is divided into two submodules:
   authentication system. This system will become the primary authentication
   system for Macrostrat, but it is still in development.
 
+- `macrostrat.auth_system.session`: ORCID sign-in for any FastAPI service,
+  extracted from Macrostrat's API v3. `create_auth_router(settings, store)`
+  provides the login, callback, refresh, logout and `me` routes; the application
+  supplies a `UserStore` that maps an ORCID iD to its own account and Postgres
+  role. `SessionReader` is the matching request dependency. The access token is
+  also a valid PostgREST JWT. First used by Mapboard.
+
 We plan to gradually converge the functionality of both versions while phasing
 out the legacy system.
 
