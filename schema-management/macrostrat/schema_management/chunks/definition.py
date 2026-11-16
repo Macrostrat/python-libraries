@@ -8,7 +8,7 @@ from typing import Callable, Optional, Union
 
 from macrostrat.database import Database
 
-from .environment import EnvironmentClass
+from ..database.environment import EnvironmentClass
 
 # A provider that applies its own statements to the database.
 DBCallable = Callable[[Database], None]

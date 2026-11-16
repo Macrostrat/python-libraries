@@ -3,8 +3,8 @@
 Views, procedures/functions, and grants are all cheap, idempotent schema
 elements that may be interleaved with other DDL in the schema files. Each has its
 own module (`views`, `procedures`, `grants`); this module holds what they share:
-walking a set of chunks for matching statements, a best-effort apply driver with
-a report, and the reusable ``--target`` / ``--no-dependents`` CLI option block.
+walking a set of chunks for matching statements, and a best-effort apply
+driver with a report.
 """
 
 from contextlib import contextmanager
@@ -12,13 +12,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, Iterator, NamedTuple, Optional
 
-from typer import Option
-
 from macrostrat.database import Database
 from macrostrat.utils import get_logger
 
-from .definition import sql_files
-from .roles import pin_role, set_applying_role
+from ..chunks.definition import sql_files
+from ..database.roles import pin_role, set_applying_role
 from .selection import ObjectName, ObjectSelector
 
 log = get_logger(__name__)
@@ -169,30 +167,3 @@ def apply_statements(
                 log.warning("statement failed (%s): %s", err, str(sql)[:100])
                 report.failures.append(StatementFailure(statement, err))
     return report
-
-
-# --- reusable CLI option block --------------------------------------------
-#
-# Shared across commands (e.g. `sync`, `provision`) so target selection is
-# consistent. Resolve the values with ``composer.selected_chunks``.
-
-TARGET_OPTION = Option(
-    None,
-    "--target",
-    help="Restrict to a subsystem (chunk); its dependencies are included "
-    "unless --no-dependents.",
-)
-
-NO_DEPENDENTS_OPTION = Option(
-    False,
-    "--no-dependents",
-    help="With --target, act on only that chunk, not the chunks it depends on.",
-)
-
-OBJECT_OPTION = Option(
-    None,
-    "--object",
-    "-o",
-    help="Restrict to statements on objects matching SCHEMA or SCHEMA.NAME "
-    "(globs allowed). Repeatable.",
-)

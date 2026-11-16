@@ -28,8 +28,8 @@ from macrostrat.database import Database
 from macrostrat.database.query import StatementContext, StatementDirective
 from macrostrat.utils import get_logger
 
-from .rebuild import ChunkStatement, iter_chunk_statements, role_switcher
 from .selection import ObjectName, ObjectSelector, parse_object_name
+from .sweep import ChunkStatement, iter_chunk_statements, role_switcher
 
 log = get_logger(__name__)
 

@@ -8,15 +8,15 @@ from typing import Callable, ContextManager, Iterable, Optional, Union
 
 from macrostrat.database import Database
 
-from .composer import build_schema, select_chunks
-from .definition import SchemaDefinition
-from .diff import StatementCounter, format_plan, plan_changes
-from .environment import EnvironmentClass, environment_class
-from .loader import load_migrations
+from .chunks.composer import build_schema, select_chunks
+from .chunks.definition import SchemaDefinition
+from .database.environment import EnvironmentClass, environment_class
+from .database.roles import applied_as_owner
 from .migrations import Migration, MigrationRunner
-from .roles import applied_as_owner
-from .selection import ObjectSelector
+from .migrations.loader import load_migrations
+from .plan import StatementCounter, format_plan, plan_changes
 from .sync import SyncReport, sync_schema_chunks
+from .sync.selection import ObjectSelector
 
 ChunkSource = Union[
     list[SchemaDefinition], Callable[[EnvironmentClass], list[SchemaDefinition]]
@@ -26,7 +26,7 @@ ChunkSource = Union[
 @contextmanager
 def scratch_database(image: str = "postgis/postgis:16-3.4", **kwargs):
     """An empty, throwaway database in a container, to build a schema into."""
-    from .cluster import database_cluster
+    from .database.cluster import database_cluster
 
     kwargs.setdefault("optimize_for_testing", True)
     with database_cluster(image, **kwargs) as db:

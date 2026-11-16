@@ -4,7 +4,7 @@ import sys
 from importlib import util
 from pathlib import Path
 
-from .migrations import Migration, concrete_migrations
+from .migration import Migration, concrete_migrations
 
 
 def load_migrations(migrations_dir: Path, *, base: type = Migration) -> list[type]:

@@ -9,13 +9,33 @@ from rich.table import Table
 from typer import Argument, Exit, Option, Typer
 
 from .app import SchemaApp
-from .composer import order_chunks
-from .diff import is_unsafe_statement
-from .rebuild import NO_DEPENDENTS_OPTION, OBJECT_OPTION, TARGET_OPTION
-from .selection import ObjectSelector
+from .chunks.composer import order_chunks
+from .plan import is_unsafe_statement
 from .sync import print_failures
+from .sync.selection import ObjectSelector
 
 AppSource = Union[SchemaApp, Callable[[], SchemaApp]]
+
+TARGET_OPTION = Option(
+    None,
+    "--target",
+    help="Restrict to a subsystem (chunk); its dependencies are included "
+    "unless --no-dependents.",
+)
+
+NO_DEPENDENTS_OPTION = Option(
+    False,
+    "--no-dependents",
+    help="With --target, act on only that chunk, not the chunks it depends on.",
+)
+
+OBJECT_OPTION = Option(
+    None,
+    "--object",
+    "-o",
+    help="Restrict to statements on objects matching SCHEMA or SCHEMA.NAME "
+    "(globs allowed). Repeatable.",
+)
 
 YES_OPTION = Option(
     False, "--yes", "-y", help="Skip the confirmation prompt where one is allowed"

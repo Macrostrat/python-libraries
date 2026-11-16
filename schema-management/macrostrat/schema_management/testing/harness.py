@@ -5,9 +5,9 @@ from typing import Optional
 from macrostrat.database import Database
 from macrostrat.database.query import StatementContext, StatementResult
 
-from .composer import dependency_closure, order_chunks
-from .definition import SchemaDefinition
-from .roles import set_applying_role
+from ..chunks.composer import dependency_closure, order_chunks
+from ..chunks.definition import SchemaDefinition
+from ..database.roles import set_applying_role
 
 
 def optimize_transform(ctx: StatementContext) -> Optional[list[StatementResult]]:

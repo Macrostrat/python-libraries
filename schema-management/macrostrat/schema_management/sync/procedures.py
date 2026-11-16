@@ -24,13 +24,13 @@ from sqlalchemy import text
 from macrostrat.database import Database
 from macrostrat.utils import get_logger
 
-from .rebuild import (
+from .selection import ObjectName, ObjectSelector, parse_object_name
+from .sweep import (
     ChunkStatement,
     RebuildReport,
     apply_statements,
     iter_chunk_statements,
 )
-from .selection import ObjectName, ObjectSelector, parse_object_name
 from .views import _is_conflict, _split_qualified
 
 log = get_logger(__name__)

@@ -26,13 +26,13 @@ import sqlparse
 
 from macrostrat.database import Database
 
-from .rebuild import (
+from .selection import ObjectName, ObjectSelector, parse_object_name, schema_names
+from .sweep import (
     ChunkStatement,
     RebuildReport,
     apply_statements,
     iter_chunk_statements,
 )
-from .selection import ObjectName, ObjectSelector, parse_object_name, schema_names
 
 # Statements that create a principal or (re)assign permissions. `CREATE USER` and
 # `CREATE GROUP` are documented aliases for `CREATE ROLE` — the same catalog object.

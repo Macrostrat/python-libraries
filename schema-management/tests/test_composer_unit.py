@@ -19,7 +19,7 @@ from macrostrat.schema_management import (
     dependency_closure,
     select_chunks,
 )
-from macrostrat.schema_management.roles import _role_pins
+from macrostrat.schema_management.database.roles import _role_pins
 
 
 def _chunks(root: Path) -> list[SchemaDefinition]:

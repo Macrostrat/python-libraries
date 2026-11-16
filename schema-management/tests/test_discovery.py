@@ -2,7 +2,10 @@
 
 from pathlib import Path
 
-from macrostrat.schema_management.discovery import discover_chunks, parse_frontmatter
+from macrostrat.schema_management.chunks.discovery import (
+    discover_chunks,
+    parse_frontmatter,
+)
 
 
 def test_parse_frontmatter_header_only():

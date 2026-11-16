@@ -4,7 +4,11 @@ from pathlib import Path
 
 from pytest import mark, raises
 
-from macrostrat.schema_management import EnvironmentClass, SchemaDefinition, classes_up_to
+from macrostrat.schema_management import (
+    EnvironmentClass,
+    SchemaDefinition,
+    classes_up_to,
+)
 
 
 class TestClassLadder:

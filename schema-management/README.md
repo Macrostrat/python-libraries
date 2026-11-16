@@ -101,14 +101,21 @@ in local and development environments, `beta` from staging, `ga` everywhere.
 `MigrationRunner` can be used directly, without a `SchemaApp`, given a database
 and a list of migration classes.
 
-## Modules
+## Layout
 
-| Module | Contents |
-| --- | --- |
-| `app`, `cli` | `SchemaApp` and the command group |
-| `definition`, `discovery`, `composer` | Chunks, discovery from SQL frontmatter, ordered builds |
-| `diff` | Schema inspection, plans, unsafe-statement accounting |
-| `sync`, `views`, `procedures`, `seed_data`, `grants`, `selection`, `rebuild` | Re-applying re-runnable content |
-| `migrations`, `conditions`, `loader` | Migrations, their condition helpers, loading from a directory |
-| `roles` | Applying DDL as an owning role |
-| `cluster` | A throwaway PostgreSQL cluster in a container |
+The package follows the four parts of the approach, over a shared base:
+
+| Subpackage | Contents | To extend |
+| --- | --- | --- |
+| `chunks` | `SchemaDefinition`, discovery from SQL frontmatter, ordered builds | A new kind of provider goes in `definition.py` |
+| `plan` | Schema inspection, plan generation, unsafe-statement accounting | A new diff rule goes beside `statements.py` |
+| `sync` | Re-applying views, procedures, seed data and grants; `--object` selection | A new kind of re-runnable object is a module beside `views.py`, on the driver in `sweep.py` |
+| `migrations` | `Migration`, condition helpers, the runner, loading from a directory | A new condition helper goes in `conditions.py` |
+| `database` | Applying DDL as an owning role, environment classes, throwaway clusters | |
+| `testing` | A harness that builds a test database chunk by chunk | |
+
+`app` (`SchemaApp`) and `cli` (the command group) sit above these. `database`
+depends on nothing here; `chunks` on `database`; `plan`, `sync` and `migrations`
+on `chunks`. The one link across is a migration's `sync_chunks`, which calls
+`sync`. Everything an application normally needs is importable from the package
+root.

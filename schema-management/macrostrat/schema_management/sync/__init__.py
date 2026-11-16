@@ -13,8 +13,8 @@ from rich.markup import escape
 
 from macrostrat.database import Database
 
-from .rebuild import RebuildReport, StatementFailure
 from .selection import ObjectSelector
+from .sweep import RebuildReport, StatementFailure
 from .views import ViewRebuildReport
 
 

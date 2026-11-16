@@ -11,8 +11,8 @@ from typing import Optional
 
 from macrostrat.database import Database
 
+from ..database.roles import set_applying_role
 from .definition import SchemaDefinition
-from .roles import set_applying_role
 
 
 def order_chunks(chunks: list[SchemaDefinition]) -> list[SchemaDefinition]:

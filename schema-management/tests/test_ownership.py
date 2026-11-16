@@ -8,7 +8,7 @@ than trying to classify statements in advance.
 
 from sqlalchemy import create_engine
 
-from macrostrat.schema_management.roles import _role_pins, applied_as_owner
+from macrostrat.schema_management.database.roles import _role_pins, applied_as_owner
 
 
 class FakeError(Exception):
@@ -114,7 +114,7 @@ def test_migrations_apply_as_their_owner():
 def test_apply_skips_the_plans_own_role_statements():
     """A plan names the role it applies as, for applying it by hand; `apply`
     manages the role itself, so those lines are neither run nor counted."""
-    from macrostrat.schema_management.diff import StatementCounter
+    from macrostrat.schema_management.plan import StatementCounter
 
     counter = StatementCounter()
     kept = [
