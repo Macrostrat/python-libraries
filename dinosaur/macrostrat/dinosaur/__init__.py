@@ -1,23 +1,33 @@
 import os
 import sys
+import warnings
 from contextlib import contextmanager, redirect_stdout
 from typing import Callable
 
 import docker
+from macrostrat.database import Database
+from macrostrat.database.utils import connection_args, run_sql, temp_database
+from macrostrat.utils import cmd, get_logger
 from results.dbdiff import Migration
 from results.dbdiff.statements import check_for_drop
 from results.schemainspect import get_inspector
 from rich import print
 
-from macrostrat.database import Database
-from macrostrat.database.utils import connection_args, run_sql, temp_database
-from macrostrat.utils import cmd, get_logger
 from .cluster import database_cluster
 from .upgrade_cluster.utils import wait_for_cluster, wait_for_ready
 
 log = get_logger(__name__)
 
 DatabaseInitializer = Callable[[Database], None]
+
+
+def _superseded(name: str):
+    warnings.warn(
+        f"macrostrat.dinosaur.{name} is deprecated; use macrostrat.schema_management"
+        " (SchemaApp, MigrationRunner) instead",
+        DeprecationWarning,
+        stacklevel=3,
+    )
 
 
 class AutoMigration(Migration):
@@ -117,6 +127,7 @@ def create_migration(
     redirect=sys.stderr,
     **kwargs,
 ):
+    _superseded("create_migration")
     with (
         _target_db(target_url, initializer, redirect=redirect) as target,
         redirect_stdout(redirect),
@@ -227,6 +238,7 @@ class MigrationManager:
     schema = None
 
     def __init__(self, database, _init_function, migrations=None, schema=None):
+        _superseded("MigrationManager")
         self.db = database
 
         self._init_function = _init_function

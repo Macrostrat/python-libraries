@@ -9,7 +9,8 @@ This is a monorepo containing **6 interconnected Python packages** within the `m
 | Package | Location | Purpose | Version |
 |---------|----------|---------|---------|
 | **macrostrat.database** | `/database` | SQLAlchemy wrapper for PostgreSQL/PostGIS; core DB operations | 4.3.0 |
-| **macrostrat.dinosaur** | `/dinosaur` | Database schema migration, upgrade, and conformance testing | - |
+| **macrostrat.dinosaur** | `/dinosaur` | Cluster upgrades; its diff migrations are deprecated for `schema_management` | - |
+| **macrostrat.schema_management** | `/schema-management` | Declarative schema chunks, diffs, sync and condition-checked migrations | 2.0.0 |
 | **macrostrat.app_frame** | `/app-frame` | Docker Compose management CLI framework for Dockerized apps | - |
 | **macrostrat.auth_system** | `/auth-system` | Authentication (legacy JWT + emerging ORCID-based) | - |
 | **macrostrat.utils** | `/utils` | Shared logging, shell commands, timers, exceptions | 1.3.3+ |
