@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.4.2] - 2026-11-18 [_changes_](https://github.com/Macrostrat/python-libraries/compare/macrostrat.raster_layers-v0.4.1...macrostrat.raster_layers-v0.4.2)
+
+- Require `macrostrat.raster_index` 0.5.1 or newer.
+
 ## [0.4.1] - 2026-11-18 [_changes_](https://github.com/Macrostrat/python-libraries/compare/macrostrat.raster_layers-v0.4.0...macrostrat.raster_layers-v0.4.1)
 
 - Require `macrostrat.raster_index` 0.5.0 or newer.

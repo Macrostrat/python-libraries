@@ -17,7 +17,21 @@ from .defs import RasterInfo
 
 log = get_logger(__name__)
 
-__all__ = ["get_raster_info", "bounds_to_geometry"]
+__all__ = ["get_raster_info", "bounds_to_geometry", "trim_colormap"]
+
+
+def trim_colormap(colormap: dict[int, tuple]) -> dict[int, tuple]:
+    """Drop the run of identical entries that pads a color table to its full size.
+
+    GDAL fills a 16-bit color table out to 65,536 entries, almost all of them
+    one repeated color, which would otherwise be stored and selected with every
+    tile. The first entry of that run is kept, in case it is a real class.
+    """
+    keys = sorted(colormap)
+    end = len(keys)
+    while end > 1 and tuple(colormap[keys[end - 2]]) == tuple(colormap[keys[-1]]):
+        end -= 1
+    return {k: colormap[k] for k in keys[:end]}
 
 
 def bounds_to_geometry(bounds: tuple[float, float, float, float]) -> dict[str, Any]:

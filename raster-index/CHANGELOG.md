@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.5.1] - 2026-11-18 [_changes_](https://github.com/Macrostrat/python-libraries/compare/macrostrat.raster_index-v0.5.0...macrostrat.raster_index-v0.5.1)
+
+- `set-colormap` drops the padding at the end of a color table (65,536 entries for a 16-bit raster).
+
 ## [0.5.0] - 2026-11-18 [_changes_](https://github.com/Macrostrat/python-libraries/compare/macrostrat.raster_index-v0.4.0...macrostrat.raster_index-v0.5.0)
 
 - Allow rasters with no layer (`raster.layer` is nullable); `add`, `scan` and `add_raster` no longer require one.

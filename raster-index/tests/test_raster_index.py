@@ -11,6 +11,7 @@ from pytest import fixture
 from shapely.geometry import Point, box, shape
 
 from macrostrat.raster_index import get_raster_info
+from macrostrat.raster_index.footprints import trim_colormap
 from macrostrat.raster_index.index import default_slug
 from macrostrat.raster_index.testing import COARSE_BOUNDS, FINE_BOUNDS
 
@@ -44,6 +45,23 @@ class TestRasterMetadata:
         assert info.colormap is not None
         # GDAL pads a color table to 256 entries; the classes we wrote are in it.
         assert info.colormap[2][:3] == (218, 50, 132)
+
+    def test_trim_drops_padding(self, raster_files):
+        colormap = get_raster_info(str(raster_files["fine"])).colormap
+        trimmed = trim_colormap(colormap)
+        assert len(trimmed) < len(colormap)
+        assert trimmed[2] == colormap[2]
+
+    def test_trim_sixteen_bit_table(self):
+        padding = (0, 0, 0, 255)
+        classes = {0: (0, 0, 0, 0), 1: (150, 150, 150, 255), 2: (142, 217, 76, 255)}
+        colormap = classes | {k: padding for k in range(3, 65536)}
+        assert trim_colormap(colormap) == classes | {3: padding}
+
+    def test_trim_keeps_a_last_class_matching_the_padding(self):
+        black = (0, 0, 0, 255)
+        colormap = {0: (0, 0, 0, 0), 1: black, 2: black, 3: black}
+        assert trim_colormap(colormap) == {0: (0, 0, 0, 0), 1: black}
 
     def test_finer_raster_has_higher_maxzoom(self, raster_files):
         fine = get_raster_info(str(raster_files["fine"]))

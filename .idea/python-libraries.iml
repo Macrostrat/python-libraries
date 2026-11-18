@@ -20,6 +20,7 @@
       <sourceFolder url="file://$MODULE_DIR$/database/macrostrat" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/dinosaur/macrostrat" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/raster-index" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/auth-system/.venv/lib/python3.11/site-packages" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/.venv" />
       <excludeFolder url="file://$MODULE_DIR$/app-frame/dist" />
       <excludeFolder url="file://$MODULE_DIR$/database/dist" />

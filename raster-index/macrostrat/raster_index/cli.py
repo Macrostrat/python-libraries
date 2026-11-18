@@ -196,12 +196,13 @@ def set_colormap(
     Serving them means having that palette at render time, which is what the
     layer's colormap is for.
     """
-    from .footprints import get_raster_info
+    from .footprints import get_raster_info, trim_colormap
 
     colormap = get_raster_info(source).colormap
     if not colormap:
         print(f"[yellow]{source} has no embedded color table")
         raise Exit(1)
+    colormap = trim_colormap(colormap)
 
     index = index_for(ctx)
     existing = {l.slug: l for l in index.layers()}
