@@ -140,12 +140,16 @@ def list_layers(ctx: Context):
 
 
 @cli.command(name="rasters")
-def list_rasters(ctx: Context, layer: Optional[str] = Argument(None)):
+def list_rasters(
+    ctx: Context,
+    layer: Optional[str] = Argument(None),
+    unassigned: bool = Option(False, help="Only rasters with no layer"),
+):
     """List indexed rasters, optionally within a single layer."""
     table = Table("Layer", "Raster", "Zooms", "Type", "Href", box=None)
-    for raster in index_for(ctx).rasters(layer):
+    for raster in index_for(ctx).rasters(layer, unassigned=unassigned):
         table.add_row(
-            raster["layer"],
+            raster["layer"] or "[dim]—",
             raster["slug"],
             _zoom_range(raster["minzoom"], raster["maxzoom"]),
             f"{raster['dtype']}×{raster['nbands']}",
@@ -315,7 +319,9 @@ def _raster_metadata(
 def add(
     ctx: Context,
     hrefs: list[str] = Argument(..., help="Raster URLs or paths"),
-    layer: str = Option(..., "--layer", "-l", help="Layer to add rasters to"),
+    layer: Optional[str] = Option(
+        None, "--layer", "-l", help="Layer to add rasters to (default: unassigned)"
+    ),
     mask_footprints: bool = Option(
         False,
         "--mask-footprints",
@@ -327,11 +333,11 @@ def add(
         help="Reader nodata override, applied instead of the file's own value",
     ),
 ):
-    """Register rasters in a layer, reading footprints and zoom ranges."""
+    """Register rasters, reading footprints and zoom ranges."""
     results = index_for(ctx).add_rasters(
         hrefs, layer, mask_footprint=mask_footprints, nodata=nodata
     )
-    print(f"[green]Registered {len(results)}/{len(hrefs)} rasters in {layer}")
+    print(f"[green]Registered {len(results)}/{len(hrefs)} rasters{_in_layer(layer)}")
 
 
 @cli.command(name="set-nodata")
@@ -546,7 +552,9 @@ def scan(
         ...,
         help="Bucket prefix, e.g. https://storage.example.org/bucket/prefix/",
     ),
-    layer: str = Option(..., "--layer", "-l", help="Layer to add rasters to"),
+    layer: Optional[str] = Option(
+        None, "--layer", "-l", help="Layer to add rasters to (default: unassigned)"
+    ),
     dry_run: bool = Option(False, help="Show what would be registered"),
     credentials: bool = Option(False, help="Sign requests with AWS credentials"),
     endpoint_url: Optional[str] = Option(
@@ -599,7 +607,7 @@ def scan(
     results = index_for(ctx).add_rasters(
         [o.href for o in objects], layer, mask_footprint=mask_footprints, nodata=nodata
     )
-    print(f"[green]Registered {len(results)}/{len(objects)} rasters in {layer}")
+    print(f"[green]Registered {len(results)}/{len(objects)} rasters{_in_layer(layer)}")
 
 
 @cli.command(name="remove")
@@ -671,6 +679,12 @@ def assets(
 
     if not index.should_generate_tile(x, y, z, layers):
         print("[yellow]No usable assets — this tile should not be generated")
+
+
+def _in_layer(layer: Optional[str]) -> str:
+    if layer is None:
+        return ", unassigned"
+    return f" in {layer}"
 
 
 def _zoom_range(minzoom, maxzoom) -> str:
