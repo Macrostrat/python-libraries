@@ -247,3 +247,13 @@ class TestUnassignedRasters:
         populated_index.add_raster(loose_raster, layer="other")
         assert populated_index.rasters(unassigned=True) == []
         assert "loose" in {r["slug"] for r in populated_index.rasters("other")}
+
+
+class TestIndexedHrefs:
+    def test_finds_rasters_in_a_layer(self, populated_index, raster_files):
+        href = str(raster_files["coarse"])
+        missing = str(raster_files["coarse"]) + ".absent"
+        assert populated_index.indexed_hrefs([href, missing]) == {href}
+
+    def test_nothing_asked_is_nothing_found(self, populated_index):
+        assert populated_index.indexed_hrefs([]) == set()
