@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.4.1] - 2026-11-18 [_changes_](https://github.com/Macrostrat/python-libraries/compare/macrostrat.raster_layers-v0.4.0...macrostrat.raster_layers-v0.4.1)
+
+- Require `macrostrat.raster_index` 0.5.0 or newer.
+
 ## [0.4.0] - 2026-09-28 [_changes_](https://github.com/Macrostrat/python-libraries/compare/macrostrat.raster_layers-v0.3.3...macrostrat.raster_layers-v0.4.0)
 
 - `raster_index`: `add_declared()` registers rasters from a declared profile

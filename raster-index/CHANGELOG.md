@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0] - 2026-11-18 [_changes_](https://github.com/Macrostrat/python-libraries/compare/macrostrat.raster_index-v0.4.0...macrostrat.raster_index-v0.5.0)
+
+- Allow rasters with no layer (`raster.layer` is nullable); `add`, `scan` and `add_raster` no longer require one.
+- Re-registering without a layer keeps the raster's existing layer.
+- Add `rasters(unassigned=True)` and `rasters --unassigned`.
+- `scan` skips rasters already in the index, in any layer or none; `--refresh` re-reads them. Add `RasterIndex.indexed_hrefs`.
+
 ## [0.4.0] - 2026-09-28 [_changes_](https://github.com/Macrostrat/python-libraries/compare/macrostrat.raster_index-v0.3.2...macrostrat.raster_index-v0.4.0)
 
 - `raster_index`: `add_declared()` registers rasters from a declared profile
