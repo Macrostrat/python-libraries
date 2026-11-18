@@ -531,6 +531,19 @@ class RasterIndex:
                 log.error("Could not register %s: %s", href, err)
         return results
 
+    def indexed_hrefs(self, hrefs: Iterable[Union[str, Path]]) -> set[str]:
+        """Which of `hrefs` are already indexed, in any layer or none.
+
+        What a repeat scan skips: registering reads each raster, so a bucket
+        that grew by a few files should cost only those files.
+        """
+        candidates = [str(h) for h in hrefs]
+        if not candidates:
+            return set()
+        sql = text("SELECT href FROM raster_layers.raster WHERE href = ANY(:hrefs)")
+        with self.engine.connect() as conn:
+            return set(conn.execute(sql, dict(hrefs=candidates)).scalars())
+
     def rasters(
         self, layer: Optional[str] = None, *, unassigned: bool = False
     ) -> list[dict[str, Any]]:

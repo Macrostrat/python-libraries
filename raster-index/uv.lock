@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.11, <4"
 resolution-markers = [
     "python_full_version >= '3.12'",
@@ -376,8 +376,9 @@ dev = [{ name = "macrostrat-utils", editable = "../utils" }]
 
 [[package]]
 name = "macrostrat-raster-index"
-version = "0.4.0"
+version = "0.5.0"
 source = { editable = "." }
+default-groups = "all"
 dependencies = [
     { name = "macrostrat-database" },
     { name = "macrostrat-utils" },

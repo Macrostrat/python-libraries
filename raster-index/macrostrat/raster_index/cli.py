@@ -577,8 +577,16 @@ def scan(
         "--nodata",
         help="Reader nodata override, applied instead of each file's own value",
     ),
+    refresh: bool = Option(
+        False,
+        "--refresh",
+        help="Re-read rasters already in the index instead of skipping them",
+    ),
 ):
     """Register every raster under a bucket prefix.
+
+    Rasters already in the index, in any layer or none, are skipped unless
+    `--refresh` is given, so a repeat scan reads only what is new.
 
     An `https://` URL — the one you'd paste into a browser — needs nothing else:
     its origin is the endpoint, its first path segment the bucket, and the
@@ -598,16 +606,34 @@ def scan(
         print(f"[yellow]No rasters found under {url}")
         return
 
+    index = index_for(ctx)
+    known: set[str] = set()
+    if not refresh:
+        known = index.indexed_hrefs(o.href for o in objects)
+    new = [o for o in objects if o.href not in known]
+
     if dry_run:
-        for obj in objects:
+        for obj in new:
             print(f"{obj.href} [dim]({obj.size / 1e6:.1f} MB)")
-        print(f"[dim]{len(objects)} rasters (dry run — nothing registered)")
+        print(
+            f"[dim]{len(new)} rasters{_already_indexed(known)}"
+            " (dry run — nothing registered)"
+        )
         return
 
-    results = index_for(ctx).add_rasters(
-        [o.href for o in objects], layer, mask_footprint=mask_footprints, nodata=nodata
+    results = index.add_rasters(
+        [o.href for o in new], layer, mask_footprint=mask_footprints, nodata=nodata
     )
-    print(f"[green]Registered {len(results)}/{len(objects)} rasters{_in_layer(layer)}")
+    print(
+        f"[green]Registered {len(results)}/{len(new)} rasters{_in_layer(layer)}"
+        f"{_already_indexed(known)}"
+    )
+
+
+def _already_indexed(known: set[str]) -> str:
+    if not known:
+        return ""
+    return f"; {len(known)} already indexed, skipped"
 
 
 @cli.command(name="remove")
