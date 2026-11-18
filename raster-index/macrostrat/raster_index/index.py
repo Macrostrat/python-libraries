@@ -253,7 +253,7 @@ class RasterIndex:
     def add_raster(
         self,
         href: Union[str, Path],
-        layer: str,
+        layer: Optional[str] = None,
         *,
         slug: Optional[str] = None,
         info: Optional[RasterInfo] = None,
@@ -270,9 +270,10 @@ class RasterIndex:
 
         Keyed on `href`, so this is an upsert: pointing the CLI at the same
         bucket twice refreshes the index rather than duplicating it. One
-        consequence worth knowing — a raster belongs to exactly one layer, so
+        consequence worth knowing — a raster belongs to at most one layer, so
         registering the same href under a different layer *moves* it rather than
-        adding a second copy. A footprint tightened earlier — clipped, traced,
+        adding a second copy. Without a `layer` a new raster is left unassigned
+        and an existing one keeps the layer it has. A footprint tightened earlier — clipped, traced,
         declared — survives a plain re-registration, since re-registering never
         *widens* a footprint; pass `footprint` to replace it. A nodata override
         survives likewise.
@@ -306,7 +307,7 @@ class RasterIndex:
                 )
                 geometry = derived.geometry
 
-        if ensure_layer:
+        if ensure_layer and layer is not None:
             self._ensure_layer(layer)
 
         metadata = dict(info.metadata)
@@ -330,7 +331,7 @@ class RasterIndex:
         )
         with self.engine.begin() as conn:
             conn.execute(_UPSERT_RASTER, params)
-        log.info("Registered raster %s in layer %s", slug, layer)
+        log.info("Registered raster %s in %s", slug, layer or "no layer")
         return info
 
     def add_declared(
@@ -512,7 +513,10 @@ class RasterIndex:
         return report
 
     def add_rasters(
-        self, hrefs: Iterable[Union[str, Path]], layer: str, **kwargs
+        self,
+        hrefs: Iterable[Union[str, Path]],
+        layer: Optional[str] = None,
+        **kwargs,
     ) -> list[RasterInfo]:
         """Register several rasters, skipping (but reporting) any that fail.
 
@@ -527,7 +531,10 @@ class RasterIndex:
                 log.error("Could not register %s: %s", href, err)
         return results
 
-    def rasters(self, layer: Optional[str] = None) -> list[dict[str, Any]]:
+    def rasters(
+        self, layer: Optional[str] = None, *, unassigned: bool = False
+    ) -> list[dict[str, Any]]:
+        """Indexed rasters: all, one layer's, or those with no layer."""
         sql = """
             SELECT id, layer, slug, href, minzoom, maxzoom, dtype, nbands,
                    nodata, crs, ST_AsGeoJSON(footprint) footprint,
@@ -537,7 +544,9 @@ class RasterIndex:
             FROM raster_layers.raster
         """
         params: dict[str, Any] = {}
-        if layer is not None:
+        if unassigned:
+            sql += " WHERE layer IS NULL"
+        elif layer is not None:
             sql += " WHERE layer = :layer"
             params["layer"] = layer
         sql += " ORDER BY layer, slug"
@@ -931,7 +940,8 @@ _UPSERT_RASTER = text("""
       CAST(:rescale_range AS numeric[]), CAST(:info AS jsonb)
     )
     ON CONFLICT (href) DO UPDATE SET
-      layer = excluded.layer,
+      -- A layer-less re-scan must not pull an assigned raster out of its layer.
+      layer = coalesce(excluded.layer, raster.layer),
       slug = excluded.slug,
       -- Re-registering never *widens* a footprint: one that was tightened —
       -- clipped to a coastline, traced from the mask, declared — survives a

@@ -4,7 +4,10 @@ The behavior worth pinning down is not "can we insert a row" but "given a tile,
 do we get the right rasters, in the right order, and nothing else".
 """
 
+import shutil
+
 from morecantile import tms
+from pytest import fixture
 from shapely.geometry import Point, box, shape
 
 from macrostrat.raster_index import get_raster_info
@@ -209,3 +212,38 @@ class TestLayerExtent:
 
     def test_empty_layer_has_no_extent(self, populated_index):
         assert populated_index.layer_extent(["minerals"], rasters=["nope"]) is None
+
+
+class TestUnassignedRasters:
+    @fixture
+    def loose_raster(self, populated_index, raster_files, tmp_path):
+        href = tmp_path / "loose.tif"
+        shutil.copy(raster_files["fine"], href)
+        yield href
+        populated_index.remove_raster(str(href))
+
+    def test_registers_without_a_layer(self, populated_index, loose_raster):
+        populated_index.add_raster(loose_raster)
+        rows = populated_index.rasters(unassigned=True)
+        assert [r["slug"] for r in rows] == ["loose"]
+        assert rows[0]["layer"] is None
+
+    def test_unassigned_raster_is_never_selected(self, populated_index, loose_raster):
+        layers = ["minerals", "other"]
+        before = populated_index.footprints(layers)
+        populated_index.add_raster(loose_raster)
+        assert populated_index.footprints(layers) == before
+
+    def test_layerless_reregistration_keeps_the_layer(
+        self, populated_index, raster_files
+    ):
+        populated_index.add_raster(raster_files["fine"], slug="fine")
+        slugs = {r["slug"] for r in populated_index.rasters("minerals")}
+        assert slugs == {"fine", "coarse"}
+        assert populated_index.rasters(unassigned=True) == []
+
+    def test_naming_a_layer_assigns_it(self, populated_index, loose_raster):
+        populated_index.add_raster(loose_raster)
+        populated_index.add_raster(loose_raster, layer="other")
+        assert populated_index.rasters(unassigned=True) == []
+        assert "loose" in {r["slug"] for r in populated_index.rasters("other")}
