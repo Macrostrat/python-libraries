@@ -8,6 +8,8 @@ Serving is a separate concern, handled by `macrostrat.raster_layers`.
 """
 
 from .categories import (
+    NoClassVocabulary,
+    categories_from_aux_xml,
     categories_from_info,
     categories_from_json,
     categories_from_mapping,
@@ -49,6 +51,8 @@ __all__ = [
     "LayerDefinition",
     "LayerExtent",
     "RasterCategory",
+    "NoClassVocabulary",
+    "categories_from_aux_xml",
     "categories_from_info",
     "categories_from_json",
     "categories_from_mapping",

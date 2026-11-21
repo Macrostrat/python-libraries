@@ -226,7 +226,8 @@ def set_categories(
     source: Optional[str] = Option(
         None,
         "--from",
-        help="Raster (href or indexed slug) whose band metadata names the classes",
+        help="Raster (href or indexed slug) whose metadata names the classes, "
+        "or its GDAL .aux.xml sidecar",
     ),
     from_json: Optional[str] = Option(
         None,
@@ -251,10 +252,14 @@ def set_categories(
 
     Labels come from the raster's GDAL band metadata by default — the same thing
     `raster info --metadata` and `gdalinfo` print — joined to its color table.
-    `--qml` and `--from-json` cover sources that label their classes elsewhere,
-    or a vocabulary that needs correcting without touching data.
+    Failing that, they come from the category names in the raster's `.aux.xml`
+    sidecar, which `--from` also accepts directly. `--qml` and `--from-json`
+    cover sources that label their classes elsewhere, or a vocabulary that
+    needs correcting without touching data.
     """
     from .categories import (
+        NoClassVocabulary,
+        categories_from_aux_xml,
         categories_from_info,
         categories_from_json,
         categories_from_qml,
@@ -277,9 +282,22 @@ def set_categories(
             categories = categories_from_json(from_json, colormap)
         elif qml is not None:
             categories = categories_from_qml(qml)
+        elif source.endswith(".aux.xml"):
+            categories = categories_from_aux_xml(source, colormap)
         else:
             info, table = _raster_metadata(index, source, layer)
-            categories = categories_from_info(info, table or colormap, key=metadata_key)
+            try:
+                categories = categories_from_info(
+                    info, table or colormap, key=metadata_key
+                )
+            except NoClassVocabulary as err:
+                if metadata_key is not None:
+                    raise
+                sidecar = _raster_href(index, source, layer) + ".aux.xml"
+                try:
+                    categories = categories_from_aux_xml(sidecar, table or colormap)
+                except (ValueError, OSError) as sidecar_err:
+                    raise ValueError(f"{err}\nNo sidecar either: {sidecar_err}")
     except (ValueError, OSError) as err:
         print(f"[red]{err}")
         raise Exit(1)
@@ -292,6 +310,14 @@ def set_categories(
         table_view.add_row(str(category.value), category.label, color)
     print(table_view)
     print(f"[green]Set a {len(categories)}-class vocabulary on [bold]{layer}[/bold]")
+
+
+def _raster_href(index: RasterIndex, source: str, layer: str) -> str:
+    """The href of an indexed raster named by slug; anything else is an href."""
+    for raster in index.rasters(layer):
+        if source in (raster["slug"], raster["href"]):
+            return raster["href"]
+    return source
 
 
 def _raster_metadata(

@@ -3,8 +3,9 @@
 A classification map stores integers; the meaning of those integers lives in
 metadata that no two producers write the same way. The EMIT mineral maps carry a
 `MINERAL_CLASSES` band-metadata item holding a Python-literal dict, plus a
-paletted `.qml` sidecar, plus an embedded color table. Other sources will
-differ.
+paletted `.qml` sidecar, plus an embedded color table. The AVIRIS maps name
+their classes as GDAL category names in an `.aux.xml` sidecar. Other sources
+will differ.
 
 Rather than teach the serving side about any of that, resolution happens once at
 ingest and the *result* is stored on the layer. Everything here turns some source
@@ -24,8 +25,10 @@ from .defs import RasterCategory
 log = get_logger(__name__)
 
 __all__ = [
+    "NoClassVocabulary",
     "categories_from_mapping",
     "categories_from_info",
+    "categories_from_aux_xml",
     "categories_from_qml",
     "categories_from_json",
     "class_metadata_candidates",
@@ -35,6 +38,10 @@ __all__ = [
 # to order candidates when no key is given — an unrecognized name that parses
 # correctly is still accepted.
 KNOWN_KEYS = ("MINERAL_CLASSES", "CLASS_NAMES", "CLASSES", "CATEGORIES")
+
+
+class NoClassVocabulary(ValueError):
+    """A source names no classes at all, so another source may be tried."""
 
 
 def categories_from_mapping(
@@ -95,7 +102,7 @@ def categories_from_info(
     """
     candidates = class_metadata_candidates(info)
     if not candidates:
-        raise ValueError(
+        raise NoClassVocabulary(
             "No band-metadata item parses as a class vocabulary. "
             f"Available items: {sorted(_metadata_keys(info)) or 'none'}"
         )
@@ -120,6 +127,38 @@ def categories_from_info(
 
     log.info("Reading class vocabulary from band metadata %s", chosen)
     return categories_from_mapping(candidates[chosen], colormap)
+
+
+def categories_from_aux_xml(
+    source: Union[str, Path],
+    colormap: Optional[dict] = None,
+    *,
+    band: int = 1,
+) -> list[RasterCategory]:
+    """Build a vocabulary from the category names in a GDAL `.aux.xml` sidecar.
+
+    GDAL keeps a band's `CategoryNames` in this persistent-metadata file, and
+    rasterio exposes them nowhere, so the file is read directly. The n-th name
+    labels value n; an empty name leaves that value unlabeled. A color table in
+    the same band wins over `colormap`, as GDAL would apply it to the raster.
+    `source` is a local path or an `http(s)` URL.
+    """
+    try:
+        root = ElementTree.fromstring(_read_text(source))
+    except ElementTree.ParseError as err:
+        raise ValueError(f"{source} is not readable XML: {err}") from err
+
+    element = root.find(f"PAMRasterBand[@band='{band}']")
+    if element is None:
+        raise NoClassVocabulary(f"{source} has no metadata for band {band}")
+
+    names = [(c.text or "").strip() for c in element.iterfind("CategoryNames/Category")]
+    mapping = {value: name for value, name in enumerate(names) if name}
+    if not mapping:
+        raise NoClassVocabulary(f"{source} has no category names for band {band}")
+
+    table = _pam_color_table(element)
+    return categories_from_mapping(mapping, table or colormap)
 
 
 def categories_from_qml(path: Union[str, Path]) -> list[RasterCategory]:
@@ -208,6 +247,27 @@ def _parse_mapping(value: Any) -> Optional[dict]:
         return {int(k): str(v) for k, v in parsed.items()}
     except (TypeError, ValueError):
         return None
+
+
+def _read_text(source: Union[str, Path]) -> str:
+    text = str(source)
+    if text.startswith(("http://", "https://")):
+        from urllib.request import urlopen
+
+        with urlopen(text, timeout=30) as response:  # noqa: S310 - caller-supplied URL
+            return response.read().decode("utf-8")
+    return Path(source).read_text()
+
+
+def _pam_color_table(band: ElementTree.Element) -> Optional[dict[int, tuple]]:
+    """A PAM band's `<ColorTable>`, indexed by entry position."""
+    entries = band.findall("ColorTable/Entry")
+    if not entries:
+        return None
+    return {
+        value: tuple(int(entry.get(f"c{i}", 255)) for i in range(1, 5))
+        for value, entry in enumerate(entries)
+    }
 
 
 def _rgba(color: Optional[tuple]) -> Optional[tuple[int, int, int, int]]:
