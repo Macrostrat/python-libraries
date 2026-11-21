@@ -119,6 +119,44 @@ class TestSetCategories:
         assert result.exit_code == 0, result.output
         assert populated_index.get_categories("minerals")
 
+    def test_falls_back_to_the_aux_xml_sidecar(
+        self, runner, database_arg, populated_index, tmp_path
+    ):
+        """Category names in a sidecar, when band metadata names no classes."""
+        from macrostrat.raster_index.testing import FINE_BOUNDS, create_test_raster
+
+        path = create_test_raster(
+            tmp_path / "unlabeled.tif", FINE_BOUNDS, size=64, classes=None
+        )
+        sidecar = tmp_path / "unlabeled.tif.aux.xml"
+        sidecar.write_text(
+            "<PAMDataset><PAMRasterBand band='1'><CategoryNames>"
+            "<Category>None</Category><Category>Kaolinite</Category>"
+            "</CategoryNames></PAMRasterBand></PAMDataset>"
+        )
+        for source in (path, sidecar):
+            result = runner.invoke(
+                cli,
+                [*database_arg, "set-categories", "minerals", "--from", str(source)],
+            )
+            assert result.exit_code == 0, result.output
+            labels = [c.label for c in populated_index.get_categories("minerals")]
+            assert labels == ["None", "Kaolinite"]
+
+    def test_no_vocabulary_anywhere_is_reported(
+        self, runner, database_arg, tmp_path
+    ):
+        from macrostrat.raster_index.testing import FINE_BOUNDS, create_test_raster
+
+        path = create_test_raster(
+            tmp_path / "unlabeled.tif", FINE_BOUNDS, size=64, classes=None
+        )
+        result = runner.invoke(
+            cli, [*database_arg, "set-categories", "minerals", "--from", str(path)]
+        )
+        assert result.exit_code == 1
+        assert "No sidecar either" in result.output
+
     def test_wrong_metadata_key_is_reported(self, runner, database_arg):
         result = runner.invoke(
             cli,

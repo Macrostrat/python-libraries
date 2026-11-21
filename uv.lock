@@ -873,7 +873,7 @@ dev = [
 
 [[package]]
 name = "macrostrat-raster-index"
-version = "0.5.1"
+version = "0.6.0"
 source = { editable = "raster-index" }
 dependencies = [
     { name = "macrostrat-database" },
@@ -916,7 +916,7 @@ dev = [
 
 [[package]]
 name = "macrostrat-raster-layers"
-version = "0.4.2"
+version = "0.4.3"
 source = { editable = "raster-layers" }
 dependencies = [
     { name = "attrs" },

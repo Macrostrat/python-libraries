@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.6.0] - 2026-11-21 [_changes_](https://github.com/Macrostrat/python-libraries/compare/macrostrat.raster_index-v0.5.1...macrostrat.raster_index-v0.6.0)
+
+- `set-categories --from` reads GDAL category names from a raster's `.aux.xml` sidecar when its band metadata names no classes, and accepts the sidecar directly. Add `categories_from_aux_xml` and `NoClassVocabulary`.
+
 ## [0.5.1] - 2026-11-18 [_changes_](https://github.com/Macrostrat/python-libraries/compare/macrostrat.raster_index-v0.5.0...macrostrat.raster_index-v0.5.1)
 
 - `set-colormap` drops the padding at the end of a color table (65,536 entries for a 16-bit raster).

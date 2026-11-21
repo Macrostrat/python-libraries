@@ -5,7 +5,9 @@ import json
 from pytest import raises
 
 from macrostrat.raster_index import (
+    NoClassVocabulary,
     RasterCategory,
+    categories_from_aux_xml,
     categories_from_info,
     categories_from_json,
     categories_from_mapping,
@@ -114,6 +116,57 @@ class TestOtherSources:
         path.write_text("<qgis/>")
         with raises(ValueError, match="paletteEntry"):
             categories_from_qml(path)
+
+
+AUX_XML = """<PAMDataset>
+  <PAMRasterBand band="1">
+    <Description>Group 2 mineral categories</Description>
+    <CategoryNames>
+      <Category>Unclassified</Category>
+      <Category/>
+      <Category>Alunite</Category>
+    </CategoryNames>
+    {color_table}
+  </PAMRasterBand>
+</PAMDataset>"""
+
+
+class TestAuxXml:
+    """GDAL category names, as the AVIRIS maps carry them in a sidecar."""
+
+    def test_names_label_values_by_position(self, tmp_path):
+        path = tmp_path / "map.tif.aux.xml"
+        path.write_text(AUX_XML.format(color_table=""))
+        categories = categories_from_aux_xml(path, {"2": [1, 2, 3, 255]})
+        # The empty name leaves value 1 unlabeled.
+        assert [(c.value, c.label) for c in categories] == [
+            (0, "Unclassified"),
+            (2, "Alunite"),
+        ]
+        assert categories[1].color == (1, 2, 3, 255)
+
+    def test_sidecar_color_table_wins(self, tmp_path):
+        path = tmp_path / "map.tif.aux.xml"
+        table = """<ColorTable>
+          <Entry c1="0" c2="0" c3="0" c4="0"/>
+          <Entry c1="9" c2="9" c3="9" c4="255"/>
+          <Entry c1="218" c2="50" c3="132" c4="255"/>
+        </ColorTable>"""
+        path.write_text(AUX_XML.format(color_table=table))
+        categories = categories_from_aux_xml(path, {"2": [1, 2, 3, 255]})
+        assert categories[1].color == (218, 50, 132, 255)
+
+    def test_no_category_names_is_an_error(self, tmp_path):
+        path = tmp_path / "map.tif.aux.xml"
+        path.write_text("<PAMDataset><PAMRasterBand band='1'/></PAMDataset>")
+        with raises(NoClassVocabulary, match="no category names"):
+            categories_from_aux_xml(path)
+
+    def test_missing_band_is_an_error(self, tmp_path):
+        path = tmp_path / "map.tif.aux.xml"
+        path.write_text(AUX_XML.format(color_table=""))
+        with raises(NoClassVocabulary, match="band 2"):
+            categories_from_aux_xml(path, band=2)
 
 
 class TestStorage:
