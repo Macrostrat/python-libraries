@@ -91,7 +91,7 @@ class ControlCommandGroup(TyperGroup):
         """Don't show the completion options in the help text, to avoid cluttering the output"""
         return [
             p
-            for p in self.params
+            for p in super().get_params(ctx)
             if not p.name in ("install_completion", "show_completion")
         ]
 

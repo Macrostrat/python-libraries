@@ -31,3 +31,10 @@ def _setup_app():
         print("Test App")
 
     return cmd
+
+
+def test_app_frame_help():
+    main = _setup_app()
+    result = runner.invoke(main, ["--help"])
+    assert result.exit_code == 0, result.output
+    assert "print-name" in result.output
