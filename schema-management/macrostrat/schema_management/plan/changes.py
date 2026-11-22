@@ -2,20 +2,22 @@
 
 from typing import Callable, Optional
 
-from results import db as results_db
 from results.dbdiff import Migration as DiffMigration
 from sqlparse import format as format_sql
 
 from macrostrat.database import Database
-from macrostrat.database.transfer.utils import raw_database_url
 
-from .inspect import get_all_schemas, get_inspector
+from .inspect import SchemaInspector, get_all_schemas, get_inspector
 
 
-def _results_db(db: Database) -> results_db:
-    # `results` does not tolerate a driver suffix such as +psycopg.
-    url = db.engine.url.set(drivername="postgresql")
-    return results_db(raw_database_url(url))
+def _inspect(db: Database, schemas: list[str]) -> SchemaInspector:
+    # Connect through the engine so its connect_args and connect events apply.
+    conn = db.engine.raw_connection()
+    try:
+        return get_inspector(conn.cursor(), schemas)
+    finally:
+        conn.rollback()
+        conn.close()
 
 
 def plan_changes(
@@ -35,8 +37,8 @@ def plan_changes(
     """
     schemas = get_all_schemas(target, excluded_schemas=excluded_schemas)
     m = DiffMigration(
-        get_inspector(_results_db(current), schemas),
-        get_inspector(_results_db(target), schemas),
+        _inspect(current, schemas),
+        _inspect(target, schemas),
     )
     m.changes.ignore_extension_versions = True
     if prepare is not None:
