@@ -7,21 +7,23 @@ submodule (though this is less recommended).
 
 ## Modules
 
-All modules are part of the `macrostrat` namespace package:
+All modules are part of the `macrostrat` namespace package. `uv run mono status`
+shows each one's current version, locally and on PyPI.
 
-- `macrostrat.app_frame`: A control framework for managing Dockerized
-  applications. Currently used by Sparrow, Mapboard GIS, and Macrostrat.
-- `macrostrat.auth_system`: Authentication utilities
-- `macrostrat.database`: Database connection and query utilities geared towards
-  PostgreSQL
-- `macrostrat.dinosaur`: Utilities for on-the-fly database migration and
-  conformance testing. **Deprecated**
-- `macrostrat.package_tools`: Monorepo versioning and PyPI publishing utilities
-- `macrostrat.raster_index`: An index of cloud-optimized rasters (COGs), grouped
-  into named layers, with the `raster_layers` schema and a registration CLI
-- `macrostrat.raster_layers`: Serves those layers as mosaicked map tiles, as
-  FastAPI routes mountable in any application
-- `macrostrat.utils`: Helpers for logging and command-line apps
+| Package | Status | Purpose |
+| --- | --- | --- |
+| `macrostrat.app_frame` | Stable | Control framework for containerized applications, and named environments for their CLIs. Used by Sparrow, Mapboard GIS and Macrostrat |
+| `macrostrat.auth_system` | Stable | ORCID sign-in and session cookies over an application's own user store |
+| `macrostrat.database` | Stable | Database connection and query utilities geared towards PostgreSQL |
+| `macrostrat.dinosaur` | Partly deprecated | Database cluster management and upgrades. Its diff-based migrations are superseded by `schema_management` |
+| `macrostrat.package_tools` | Stable | Monorepo versioning and PyPI publishing (the `mono` command) |
+| `macrostrat.raster_index` | Early (0.x) | An index of cloud-optimized rasters (COGs), grouped into named layers, with the `raster_layers` schema and a registration CLI |
+| `macrostrat.raster_layers` | Early (0.x) | Serves those layers as mosaicked map tiles, as FastAPI routes mountable in any application |
+| `macrostrat.schema_management` | Stable | Declarative PostgreSQL schemas, schema diffs and condition-checked migrations |
+| `macrostrat.task_runner` | Early (0.x) | Background tasks with live terminal output in the browser and a cancel that acts like Ctrl-C |
+| `macrostrat.utils` | Stable | Helpers for logging and command-line apps |
+
+"Early" packages may change their interfaces in a minor release.
 
 A package with the `Private :: Do Not Upload` classifier, or without a
 `classifiers` field, is not included in publishing.
