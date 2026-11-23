@@ -1,0 +1,42 @@
+[project]
+name = "macrostrat.task_runner"
+version = "0.1.0"
+description = "Background tasks with live terminal output and a cancel that acts like Ctrl-C"
+authors = [{ name = "Daven Quinn", email = "code@davenquinn.com" }]
+requires-python = ">=3.10,<4"
+readme = "README.md"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+# Light by design: an API holds the catalog and serves output without the task code.
+dependencies = [
+    "macrostrat.database>=4.7.0,<5.0.0",
+    "pydantic>=2,<3",
+    "redis>=4.5,<8",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.2,<10",
+    "rich>=13",
+]
+
+[tool.uv]
+default-groups = "all"
+
+[tool.uv.sources]
+"macrostrat.database" = { path = "../database", editable = true }
+
+[tool.uv.build-backend]
+module-name = ["macrostrat"]
+module-root = ""
+namespace = true
+
+[build-system]
+requires = ["uv_build>=0.9.21,<0.12.0"]
+build-backend = "uv_build"

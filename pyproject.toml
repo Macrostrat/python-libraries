@@ -20,6 +20,7 @@ dev = [
     "macrostrat.auth_system",
     "macrostrat.raster_index",
     "macrostrat.raster_layers",
+    "macrostrat.task_runner",
     "pytest>=7.2.2,<10",
     "pillow>=10.0",
     "mapbox-vector-tile>=2.1.0,<3",
@@ -55,6 +56,7 @@ repository = "https://github.com/Macrostrat/python-libraries"
 "macrostrat.auth_system" = { path = "./auth-system", editable = true }
 "macrostrat.raster_index" = { path = "./raster-index", editable = true }
 "macrostrat.raster_layers" = { path = "./raster-layers", editable = true }
+"macrostrat.task_runner" = { path = "./task-runner", editable = true }
 
 
 [tool.pytest.ini_options]
