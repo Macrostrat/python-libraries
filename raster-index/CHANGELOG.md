@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.6.1] - 2026-11-25 [_changes_](https://github.com/Macrostrat/python-libraries/compare/macrostrat.raster_index-v0.6.0...macrostrat.raster_index-v0.6.1)
+
+- `set-categories --from` reads a `.qml`, `.aux.xml` or `.json` label file by its extension, local or over http(s); `--qml` and `--from-json` are removed. Add `categories_from_file` and `is_label_file`.
+
 ## [0.6.0] - 2026-11-21 [_changes_](https://github.com/Macrostrat/python-libraries/compare/macrostrat.raster_index-v0.5.1...macrostrat.raster_index-v0.6.0)
 
 - `set-categories --from` reads GDAL category names from a raster's `.aux.xml` sidecar when its band metadata names no classes, and accepts the sidecar directly. Add `categories_from_aux_xml` and `NoClassVocabulary`.
