@@ -5,6 +5,8 @@ test_raster_index.py); what's worth testing here is how a connection is
 resolved — explicitly, from a host application's default, or not at all.
 """
 
+import re
+
 from pytest import fixture
 from typer.testing import CliRunner
 
@@ -181,7 +183,8 @@ class TestSetCategories:
     def test_a_source_is_required(self, runner, database_arg):
         result = runner.invoke(cli, [*database_arg, "set-categories", "minerals"])
         assert result.exit_code != 0
-        assert "--from" in result.output
+        # CI's terminal colors the usage error, splitting `--from` with escapes.
+        assert "--from" in re.sub(r"\x1b\[[0-9;]*m", "", result.output)
 
     def test_from_a_qml_style(self, runner, database_arg, populated_index, tmp_path):
         """A label file is read by its extension, with no flag of its own."""
