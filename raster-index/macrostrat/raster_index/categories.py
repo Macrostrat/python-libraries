@@ -16,6 +16,7 @@ import ast
 import json
 from pathlib import Path
 from typing import Any, Iterator, Optional, Union
+from urllib.parse import urlparse
 from xml.etree import ElementTree
 
 from macrostrat.utils import get_logger
@@ -31,6 +32,8 @@ __all__ = [
     "categories_from_aux_xml",
     "categories_from_qml",
     "categories_from_json",
+    "categories_from_file",
+    "is_label_file",
     "class_metadata_candidates",
 ]
 
@@ -168,7 +171,10 @@ def categories_from_qml(path: Union[str, Path]) -> list[RasterCategory]:
     not in the raster. Colors come from the style rather than the color table,
     since that is the whole point of having one.
     """
-    tree = ElementTree.parse(str(path))
+    try:
+        tree = ElementTree.fromstring(_read_text(path))
+    except ElementTree.ParseError as err:
+        raise ValueError(f"{path} is not readable XML: {err}") from err
     categories = []
     for entry in tree.iter("paletteEntry"):
         value = entry.get("value")
@@ -197,14 +203,46 @@ def categories_from_json(
     be corrected without touching data. Accepts either a `{value: label}` object
     or a list of `RasterCategory` objects.
     """
-    data = json.loads(Path(path).read_text())
+    data = json.loads(_read_text(path))
     if isinstance(data, dict):
         return categories_from_mapping(data, colormap)
     categories = [RasterCategory(**item) for item in data]
     return sorted(categories, key=lambda c: c.value)
 
 
+def categories_from_file(
+    source: Union[str, Path],
+    colormap: Optional[dict] = None,
+) -> list[RasterCategory]:
+    """Build a vocabulary from a label file, reading it by its extension.
+
+    `.qml`, `.aux.xml` and `.json` are recognized; `source` is a local path or
+    an `http(s)` URL.
+    """
+    reader = _label_file_reader(source)
+    if reader is None:
+        raise ValueError(f"{source} is not a .qml, .aux.xml or .json file")
+    return reader(source, colormap)
+
+
+def is_label_file(source: Union[str, Path]) -> bool:
+    """Whether `source` names a label file rather than a raster."""
+    return _label_file_reader(source) is not None
+
+
 # -- Internals -------------------------------------------------------------
+
+
+def _label_file_reader(source: Union[str, Path]):
+    name = urlparse(str(source)).path.lower()
+    if name.endswith(".aux.xml"):
+        return categories_from_aux_xml
+    if name.endswith(".qml"):
+        # A style carries its own colors, so the layer's colormap is not used.
+        return lambda path, colormap: categories_from_qml(path)
+    if name.endswith(".json"):
+        return categories_from_json
+    return None
 
 
 def _band_metadata_items(info: dict) -> Iterator[tuple[str, Any]]:

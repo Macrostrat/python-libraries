@@ -1,19 +1,24 @@
 """Deriving and storing a categorical layer's class vocabulary."""
 
 import json
+from functools import partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from threading import Thread
 
-from pytest import raises
+from pytest import fixture, raises
 
 from macrostrat.raster_index import (
     NoClassVocabulary,
     RasterCategory,
     categories_from_aux_xml,
+    categories_from_file,
     categories_from_info,
     categories_from_json,
     categories_from_mapping,
     categories_from_qml,
     class_metadata_candidates,
     get_raster_info,
+    is_label_file,
 )
 from macrostrat.raster_index.testing import CATEGORICAL_CLASSES, CATEGORICAL_COLORMAP
 
@@ -167,6 +172,54 @@ class TestAuxXml:
         path.write_text(AUX_XML.format(color_table=""))
         with raises(NoClassVocabulary, match="band 2"):
             categories_from_aux_xml(path, band=2)
+
+
+QML = """<qgis><pipe><rasterrenderer><colorPalette>
+  <paletteEntry value="1" label="Kaolinite" color="#969696" alpha="255"/>
+</colorPalette></rasterrenderer></pipe></qgis>"""
+
+
+@fixture
+def served(tmp_path):
+    """`tmp_path` over HTTP, as a bucket serves sidecars."""
+    handler = partial(SimpleHTTPRequestHandler, directory=str(tmp_path))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_port}"
+    server.shutdown()
+
+
+class TestLabelFiles:
+    """`--from` reads a label file by its extension, local or remote."""
+
+    def test_detects_label_files(self):
+        assert is_label_file("style.qml")
+        assert is_label_file("https://host/bucket/map.tif.aux.xml?v=2")
+        assert is_label_file("/data/classes.JSON")
+        assert not is_label_file("https://host/bucket/map.tif")
+        assert not is_label_file("AV5_Nevada_G2")
+
+    def test_reads_by_extension(self, tmp_path):
+        (tmp_path / "style.qml").write_text(QML)
+        (tmp_path / "classes.json").write_text(json.dumps({"1": "Kaolinite"}))
+        (tmp_path / "map.tif.aux.xml").write_text(AUX_XML.format(color_table=""))
+        expected = {
+            "style.qml": ["Kaolinite"],
+            "classes.json": ["Kaolinite"],
+            "map.tif.aux.xml": ["Unclassified", "Alunite"],
+        }
+        for name, labels in expected.items():
+            assert [c.label for c in categories_from_file(tmp_path / name)] == labels
+
+    def test_unrecognized_file_is_an_error(self):
+        with raises(ValueError, match=".qml, .aux.xml or .json"):
+            categories_from_file("map.tif")
+
+    def test_reads_remote_files(self, tmp_path, served):
+        (tmp_path / "style.qml").write_text(QML)
+        (tmp_path / "classes.json").write_text(json.dumps({"2": "Alunite"}))
+        assert categories_from_file(f"{served}/style.qml")[0].label == "Kaolinite"
+        assert categories_from_file(f"{served}/classes.json")[0].label == "Alunite"
 
 
 class TestStorage:
