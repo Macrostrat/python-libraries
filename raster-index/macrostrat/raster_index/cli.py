@@ -223,19 +223,11 @@ def set_colormap(
 def set_categories(
     ctx: Context,
     layer: str,
-    source: Optional[str] = Option(
-        None,
+    source: str = Option(
+        ...,
         "--from",
-        help="Raster (href or indexed slug) whose metadata names the classes, "
-        "or its GDAL .aux.xml sidecar",
-    ),
-    from_json: Optional[str] = Option(
-        None,
-        "--from-json",
-        help="JSON file holding a {value: label} mapping or a list of categories",
-    ),
-    qml: Optional[str] = Option(
-        None, "--qml", help="QGIS .qml paletted style naming the classes"
+        help="Raster (href or indexed slug), or a .qml, .aux.xml or .json label "
+        "file; paths and http(s) URLs alike",
     ),
     metadata_key: Optional[str] = Option(
         None,
@@ -253,21 +245,18 @@ def set_categories(
     Labels come from the raster's GDAL band metadata by default — the same thing
     `raster info --metadata` and `gdalinfo` print — joined to its color table.
     Failing that, they come from the category names in the raster's `.aux.xml`
-    sidecar, which `--from` also accepts directly. `--qml` and `--from-json`
-    cover sources that label their classes elsewhere, or a vocabulary that
-    needs correcting without touching data.
+    sidecar. `--from` also takes a label file directly, read by its extension:
+    a QGIS `.qml` paletted style, a GDAL `.aux.xml`, or a `.json` vocabulary —
+    for sources that label their classes elsewhere, or a vocabulary that needs
+    correcting without touching data.
     """
     from .categories import (
         NoClassVocabulary,
         categories_from_aux_xml,
+        categories_from_file,
         categories_from_info,
-        categories_from_json,
-        categories_from_qml,
+        is_label_file,
     )
-
-    sources = [s for s in (source, from_json, qml) if s is not None]
-    if len(sources) != 1:
-        raise BadParameter("Pass exactly one of --from, --from-json or --qml")
 
     index = index_for(ctx)
     existing = {l.slug: l for l in index.layers()}
@@ -278,12 +267,8 @@ def set_categories(
     colormap = existing[layer].colormap
 
     try:
-        if from_json is not None:
-            categories = categories_from_json(from_json, colormap)
-        elif qml is not None:
-            categories = categories_from_qml(qml)
-        elif source.endswith(".aux.xml"):
-            categories = categories_from_aux_xml(source, colormap)
+        if is_label_file(source):
+            categories = categories_from_file(source, colormap)
         else:
             info, table = _raster_metadata(index, source, layer)
             try:

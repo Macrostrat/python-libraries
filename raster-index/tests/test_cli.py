@@ -143,9 +143,7 @@ class TestSetCategories:
             labels = [c.label for c in populated_index.get_categories("minerals")]
             assert labels == ["None", "Kaolinite"]
 
-    def test_no_vocabulary_anywhere_is_reported(
-        self, runner, database_arg, tmp_path
-    ):
+    def test_no_vocabulary_anywhere_is_reported(self, runner, database_arg, tmp_path):
         from macrostrat.raster_index.testing import FINE_BOUNDS, create_test_raster
 
         path = create_test_raster(
@@ -180,10 +178,23 @@ class TestSetCategories:
         assert result.exit_code == 1
         assert "not defined" in result.output
 
-    def test_exactly_one_source_is_required(self, runner, database_arg):
+    def test_a_source_is_required(self, runner, database_arg):
         result = runner.invoke(cli, [*database_arg, "set-categories", "minerals"])
         assert result.exit_code != 0
-        assert "exactly one" in result.output
+        assert "--from" in result.output
+
+    def test_from_a_qml_style(self, runner, database_arg, populated_index, tmp_path):
+        """A label file is read by its extension, with no flag of its own."""
+        style = tmp_path / "style.qml"
+        style.write_text(
+            '<qgis><paletteEntry value="2" label="Alunite" color="#da3284"/></qgis>'
+        )
+        result = runner.invoke(
+            cli, [*database_arg, "set-categories", "minerals", "--from", str(style)]
+        )
+        assert result.exit_code == 0, result.output
+        categories = populated_index.get_categories("minerals")
+        assert [c.label for c in categories] == ["Alunite"]
 
 
 def test_info_metadata_surfaces_class_vocabularies(runner, raster_files):

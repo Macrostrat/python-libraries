@@ -10,11 +10,13 @@ Serving is a separate concern, handled by `macrostrat.raster_layers`.
 from .categories import (
     NoClassVocabulary,
     categories_from_aux_xml,
+    categories_from_file,
     categories_from_info,
     categories_from_json,
     categories_from_mapping,
     categories_from_qml,
     class_metadata_candidates,
+    is_label_file,
 )
 from .declared import Mismatch, VerificationReport
 from .defs import (
@@ -53,9 +55,11 @@ __all__ = [
     "RasterCategory",
     "NoClassVocabulary",
     "categories_from_aux_xml",
+    "categories_from_file",
     "categories_from_info",
     "categories_from_json",
     "categories_from_mapping",
     "categories_from_qml",
     "class_metadata_candidates",
+    "is_label_file",
 ]
