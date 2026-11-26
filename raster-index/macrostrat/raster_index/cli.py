@@ -187,22 +187,36 @@ def set_colormap(
     source: str = Option(
         ...,
         "--from",
-        help="Raster whose embedded palette should become the layer's colormap",
+        help="Raster whose embedded palette becomes the layer's colormap, "
+        "or a .qml, .aux.xml or .json label file carrying colors",
     ),
 ):
-    """Copy a raster's embedded color table onto its layer.
+    """Set a layer's colormap from a raster's color table or a label file.
 
     Categorical rasters (classification maps) carry their palette in the file.
     Serving them means having that palette at render time, which is what the
-    layer's colormap is for.
+    layer's colormap is for. A label file (e.g. a QGIS style) can override it,
+    so the map is drawn in the same colors as the legend from `set-categories`.
     """
+    from .categories import categories_from_file, is_label_file
     from .footprints import get_raster_info, trim_colormap
 
-    colormap = get_raster_info(source).colormap
-    if not colormap:
-        print(f"[yellow]{source} has no embedded color table")
-        raise Exit(1)
-    colormap = trim_colormap(colormap)
+    if is_label_file(source):
+        try:
+            categories = categories_from_file(source)
+        except ValueError as err:
+            print(f"[yellow]{err}")
+            raise Exit(1)
+        colormap = {c.value: c.color for c in categories if c.color is not None}
+        if not colormap:
+            print(f"[yellow]{source} gives no class colors")
+            raise Exit(1)
+    else:
+        colormap = get_raster_info(source).colormap
+        if not colormap:
+            print(f"[yellow]{source} has no embedded color table")
+            raise Exit(1)
+        colormap = trim_colormap(colormap)
 
     index = index_for(ctx)
     existing = {l.slug: l for l in index.layers()}

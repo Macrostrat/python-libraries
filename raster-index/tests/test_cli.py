@@ -200,6 +200,41 @@ class TestSetCategories:
         assert [c.label for c in categories] == ["Alunite"]
 
 
+
+class TestSetColormap:
+    def test_from_an_embedded_color_table(
+        self, runner, database_arg, populated_index, raster_files
+    ):
+        result = runner.invoke(
+            cli,
+            [*database_arg, "set-colormap", "minerals", "--from", str(raster_files["fine"])],
+        )
+        assert result.exit_code == 0, result.output
+        assert populated_index.layer("minerals").colormap["2"][:3] == [218, 50, 132]
+
+    def test_from_a_qml_style(self, runner, database_arg, populated_index, tmp_path):
+        """So tiles are drawn in the colors the legend shows."""
+        style = tmp_path / "style.qml"
+        style.write_text(
+            '<qgis><paletteEntry value="2" label="Alunite" color="#010203"/></qgis>'
+        )
+        result = runner.invoke(
+            cli, [*database_arg, "set-colormap", "minerals", "--from", str(style)]
+        )
+        assert result.exit_code == 0, result.output
+        assert populated_index.layer("minerals").colormap == {"2": [1, 2, 3, 255]}
+
+    def test_label_file_without_colors_is_reported(
+        self, runner, database_arg, tmp_path
+    ):
+        labels = tmp_path / "classes.json"
+        labels.write_text('{"1": "Kaolinite"}')
+        result = runner.invoke(
+            cli, [*database_arg, "set-colormap", "minerals", "--from", str(labels)]
+        )
+        assert result.exit_code == 1
+        assert "no class colors" in result.output
+
 def test_info_metadata_surfaces_class_vocabularies(runner, raster_files):
     """`info --metadata` is how you find out what set-categories can read."""
     result = runner.invoke(cli, ["info", str(raster_files["fine"]), "--metadata"])
